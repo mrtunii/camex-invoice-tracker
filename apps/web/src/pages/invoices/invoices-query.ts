@@ -1,6 +1,5 @@
 import {
   type InvoiceListResponse,
-  invoiceDetailSchema,
   invoiceListResponseSchema,
   invoiceSummarySchema,
 } from '@camex/shared';
@@ -42,14 +41,6 @@ export function useInvoiceSummary(filters: ListFilters, refetchInterval: number 
     queryFn: () => api(path, invoiceSummarySchema),
     placeholderData: keepPreviousData,
     refetchInterval,
-  });
-}
-
-export function useInvoice(id: string | null) {
-  return useQuery({
-    queryKey: [...invoicesQueryKey, 'detail', id],
-    queryFn: () => api(`/invoices/${id ?? ''}`, invoiceDetailSchema),
-    enabled: id !== null,
   });
 }
 

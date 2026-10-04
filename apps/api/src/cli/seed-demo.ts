@@ -241,6 +241,8 @@ interface PlannedInvoice {
   email: EmailSeed | null;
   receivedAt: Date;
   outcome: Outcome;
+  /** The same PDF file (same bytes) as the planned invoice with this file name. */
+  sameFileAs?: string;
 }
 
 /** A line: `quantity × price` when a quantity is given, else a fee of `price`. */
@@ -280,6 +282,8 @@ interface GeneratedSeed {
   manual?: boolean;
   /** Sender other than the vendor's usual one. */
   email?: EmailSeed;
+  /** Bank details printed on this invoice (default: its vendor's). */
+  bank?: BankDetails;
 }
 
 const OTP: GeneratedSeed['airport'] = ['LROP', 'OTP', 'LROP - Bucharest, RO'];
@@ -566,6 +570,16 @@ const GENERATED: GeneratedSeed[] = [
     printedDue: true,
     outcome: { status: 'needs_review' },
     pdf: 'aeg',
+    // Approving it (T06) creates the vendor and can trust these: BANK_FIRST_SEEN once linked.
+    bank: {
+      beneficiary: 'KOLKHI AVIATION SERVICES LLC',
+      bankName: 'TBC Bank',
+      iban: 'GE47TB0000000367812945',
+      accountNumber: null,
+      swift: 'TBCBGE22',
+      routingNumber: null,
+      currency: 'GEL',
+    },
     email: {
       from: 'Kolkhi Aviation Services <accounts@kolkhi-aviation.example>',
       subject: 'Invoice KAS-0193 for your charter flight',
@@ -658,7 +672,7 @@ function generatedExtraction(seed: GeneratedSeed, invoiceDate: string): Extracte
     amountDue: total,
     amountDueCurrency: seed.currency,
     lineItems,
-    bankDetails: seed.vendor === null ? null : VENDORS[seed.vendor].bank,
+    bankDetails: seed.bank ?? (seed.vendor === null ? null : VENDORS[seed.vendor].bank),
     notes: null,
   };
 }
@@ -701,6 +715,22 @@ function plan(today: string, now: Date): PlannedInvoice[] {
       email: emailOf('aeg', '3110713'),
       receivedAt: aegReceived,
       outcome: { status: 'paid', paidAt: aegPaid, reference: paymentReference(aegPaid, 0) },
+    },
+    // ASM sends the unpaid invoice again as a reminder: the same file, so DUPLICATE_FILE and
+    // DUPLICATE_NUMBER on both copies until the reminder is rejected as a duplicate (T06).
+    {
+      vendor: 'asm',
+      pdf: 'asm',
+      fileName: 'SI-000218719.pdf',
+      extracted: FIXTURE_DATA.asm,
+      email: {
+        from: VENDORS.asm.from,
+        subject: 'Reminder: invoice SI-000218719 is overdue',
+        body: 'Dear customer,\n\nOur records show invoice SI-000218719 as unpaid. A copy is attached for your convenience.\n\nASM Accounts Receivable',
+      },
+      receivedAt: received(addDays(today, -2), 100),
+      outcome: { status: 'needs_review' },
+      sameFileAs: 'SI-000218719.pdf',
     },
     {
       vendor: 'petrocas',
@@ -1015,12 +1045,21 @@ async function seed(env: Env): Promise<void> {
 
     // Files first, like ingestion: a failed run leaves orphan files at worst, never rows without files.
     const pdfs: StoredPdf[] = [];
+    const bytesByFile = new Map<string, Buffer>();
     for (const [index, invoice] of invoices.entries()) {
       const invoiceId = randomUUID();
-      const bytes = Buffer.concat([
-        readFileSync(resolve(FIXTURES, `${invoice.pdf}.pdf`)),
-        Buffer.from(`\n% camex demo seed ${String(index)} ${invoiceId}\n`),
-      ]);
+      const copied =
+        invoice.sameFileAs === undefined ? undefined : bytesByFile.get(invoice.sameFileAs);
+      if (invoice.sameFileAs !== undefined && copied === undefined) {
+        throw new Error(`${invoice.fileName}: the file it copies must come first`);
+      }
+      const bytes =
+        copied ??
+        Buffer.concat([
+          readFileSync(resolve(FIXTURES, `${invoice.pdf}.pdf`)),
+          Buffer.from(`\n% camex demo seed ${String(index)} ${invoiceId}\n`),
+        ]);
+      if (!bytesByFile.has(invoice.fileName)) bytesByFile.set(invoice.fileName, bytes);
       const key = invoicePdfKey(invoiceId, invoice.receivedAt);
       await storage.put(key, bytes, 'application/pdf');
       pdfs.push({

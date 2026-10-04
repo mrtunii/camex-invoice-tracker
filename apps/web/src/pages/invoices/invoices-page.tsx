@@ -9,7 +9,7 @@ import {
 } from '@camex/shared';
 import { Button, Link, Pagination, Tabs, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { CircleCheck, Download } from 'lucide-react';
 import { type ReactNode, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/page-header';
@@ -238,6 +238,15 @@ export function InvoicesPage() {
     setSearch(writeListParams({ ...params, sort: key, order, page: 1 }));
   };
 
+  // "Approve & next" lands here when nothing is left to review.
+  const navState: unknown = location.state;
+  const caughtUp =
+    params.status === 'needs_review' &&
+    typeof navState === 'object' &&
+    navState !== null &&
+    'caughtUp' in navState &&
+    navState.caughtUp === true;
+
   const counts: InvoiceSummary['counts'] | undefined = summary.data?.counts;
   const data = list.data;
   const pastEnd = data !== undefined && data.items.length === 0 && data.total > 0;
@@ -278,6 +287,12 @@ export function InvoicesPage() {
           />
         }
       />
+      {caughtUp && (
+        <p role="status" className="flex items-center gap-2">
+          <CircleCheck className="size-4 text-ok" aria-hidden />
+          All caught up. Nothing else is waiting for review.
+        </p>
+      )}
 
       <Tabs
         variant="secondary"

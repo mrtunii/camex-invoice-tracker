@@ -86,7 +86,7 @@ describe('invoice evaluation', () => {
         'DISPUTE_SOON:warning',
         'NEW_VENDOR:info',
       ]);
-      expect(asm.flags[0]?.message).toBe('Dispute window ended 2026-09-30');
+      expect(asm.flags[0]?.message).toBe('Dispute window ended 30 Sep 2026');
       const petrocas = await detail(ids.petrocas);
       expect(petrocas.flags.map((f) => `${f.code}:${f.severity}:${f.field ?? ''}`)).toEqual([
         'MISSING_REQUIRED:error:dueDate',
@@ -95,7 +95,7 @@ describe('invoice evaluation', () => {
       ]);
       const aeg = await detail(ids.aeg);
       expect(aeg.flags.map((f) => f.message)).toEqual([
-        'Dispute window ended 2026-09-24',
+        'Dispute window ended 24 Sep 2026',
         'No vendor matched: link an existing vendor or create one',
       ]);
 
@@ -130,6 +130,7 @@ describe('invoice evaluation', () => {
         .http()
         .post(`/api/invoices/${ids.aeg}/trust-bank-details`)
         .set('Cookie', cookie)
+        .send({ version: (await row(ids.aeg)).version })
         .expect(200);
       expect(await codesOf(ids.aeg)).toEqual(['DISPUTE_SOON']);
 
@@ -409,7 +410,7 @@ describe('invoice evaluation', () => {
           code: 'DISPUTE_SOON',
           severity: 'warning',
           field: 'disputeDeadline',
-          message: 'Dispute window ends 2026-09-30',
+          message: 'Dispute window ends 30 Sep 2026',
         },
         expect.objectContaining({ code: 'NEW_VENDOR' }),
       ]);
@@ -417,7 +418,7 @@ describe('invoice evaluation', () => {
       setToday(t, '2026-10-01');
       await workers.run();
       expect((await row(id)).flags).toMatchObject([
-        { code: 'DISPUTE_SOON', message: 'Dispute window ended 2026-09-30' },
+        { code: 'DISPUTE_SOON', message: 'Dispute window ended 30 Sep 2026' },
         { code: 'NEW_VENDOR' },
       ]);
     });

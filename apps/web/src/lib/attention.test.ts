@@ -101,6 +101,7 @@ void describe('statusSentences', () => {
       { text: '1 invoice', href: ATTENTION_LINKS.extractionFailed, tone: 'warning' },
     ]);
     assert.equal(ATTENTION_LINKS.overdue, '/invoices?status=unpaid&due=overdue');
+    assert.equal(ATTENTION_LINKS.extractionFailed, '/invoices?extraction=failed');
     assert.equal(ATTENTION_LINKS.dueSoon, '/invoices?status=unpaid&due=soon');
   });
 });

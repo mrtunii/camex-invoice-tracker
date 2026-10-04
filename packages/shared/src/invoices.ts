@@ -6,6 +6,7 @@ import {
   currencyCodeSchema,
   decimalStringSchema,
   documentTypeSchema,
+  extractedInvoiceSchema,
   extractedLineItemSchema,
   invoiceCategorySchema,
 } from './extraction.js';
@@ -44,6 +45,27 @@ export type UploadRejected = z.infer<typeof uploadRejectedSchema>;
 /** How invoices.due_date was set (SPEC §5, §7). Printed and manual dates are never re-derived. */
 export const dueDateSourceSchema = z.enum(['printed', 'terms', 'vendor_default', 'manual']);
 export type DueDateSource = z.infer<typeof dueDateSourceSchema>;
+
+/** SPEC §5 invoices.rejection_reason. */
+export const rejectionReasonSchema = z.enum(['duplicate', 'not_invoice', 'disputed', 'other']);
+export type RejectionReason = z.infer<typeof rejectionReasonSchema>;
+
+/** SPEC §5 invoice_events.type. */
+export const invoiceEventTypeSchema = z.enum([
+  'received',
+  'extracted',
+  'extraction_failed',
+  'edited',
+  'approved',
+  'rejected',
+  'paid',
+  'payment_undone',
+  'reopened',
+  'reextracted',
+  'vendor_linked',
+  'bank_account_trusted',
+]);
+export type InvoiceEventType = z.infer<typeof invoiceEventTypeSchema>;
 
 /** SPEC §8 flag codes, in table order. */
 export const flagCodeSchema = z.enum([
@@ -84,9 +106,25 @@ export const invoiceFlagSchema = z.object({
 });
 export type InvoiceFlag = z.infer<typeof invoiceFlagSchema>;
 
+/** The email (or manual upload) that carried the PDF; its body comes from GET /api/inbox/:id. */
+export const invoiceSourceEmailSchema = z.object({
+  id: uuidSchema,
+  provider: z.enum(['mailgun', 'manual']),
+  fromAddress: z.string().nullable(),
+  subject: z.string().nullable(),
+  receivedAt: isoTimestampSchema,
+  /** Who uploaded it (manual uploads only). */
+  uploadedBy: namedRefSchema.nullable(),
+  /** Attachments that weren't PDFs: recorded, not stored. */
+  ignoredAttachments: z.array(
+    z.object({ filename: z.string(), contentType: z.string(), size: z.number().int() }),
+  ),
+});
+export type InvoiceSourceEmail = z.infer<typeof invoiceSourceEmailSchema>;
+
 /**
- * GET /api/invoices/:id. Decimals are strings, calendar dates 'YYYY-MM-DD'. The raw model
- * output is not exposed. (T06 adds workflow fields, the source email and the activity log.)
+ * GET /api/invoices/:id. Decimals are strings, calendar dates 'YYYY-MM-DD'. The raw model output
+ * is not exposed; `extracted` is its normalized reading.
  */
 export const invoiceDetailSchema = z.object({
   id: uuidSchema,
@@ -96,12 +134,23 @@ export const invoiceDetailSchema = z.object({
   fileSha256: z.string(),
   pageCount: z.number().int().nullable(),
   status: invoiceStatusSchema,
+  /**
+   * Optimistic concurrency (T06): every human write (an edit or a transition) carries the version
+   * it was made against and increments it; a mismatch is 409 STALE. The evaluator and the
+   * extraction worker don't change it.
+   */
+  version: z.number().int().nonnegative(),
 
   extractionStatus: extractionStatusSchema,
   extractionError: z.string().nullable(),
   extractionModel: z.string().nullable(),
   extractionPromptVersion: z.string().nullable(),
   extractedAt: isoTimestampSchema.nullable(),
+  /**
+   * The model's reading, normalized (normalizeExtraction of the raw output): what the fields were
+   * before anyone edited them. Null unless the extraction succeeded.
+   */
+  extracted: extractedInvoiceSchema.nullable(),
 
   documentType: documentTypeSchema.nullable(),
   vendorId: uuidSchema.nullable(),
@@ -137,6 +186,20 @@ export const invoiceDetailSchema = z.object({
   bankDetails: bankDetailsSchema.nullable(),
   notes: z.string().nullable(),
   flags: z.array(invoiceFlagSchema),
+
+  // Workflow (SPEC §6). Cleared again by Reopen and Undo payment; the history is in the events.
+  approvedAt: isoTimestampSchema.nullable(),
+  approvedBy: namedRefSchema.nullable(),
+  paidAt: calendarDateSchema.nullable(),
+  paidBy: namedRefSchema.nullable(),
+  paymentReference: z.string().nullable(),
+  paymentNote: z.string().nullable(),
+  rejectedAt: isoTimestampSchema.nullable(),
+  rejectedBy: namedRefSchema.nullable(),
+  rejectionReason: rejectionReasonSchema.nullable(),
+  rejectionNote: z.string().nullable(),
+
+  email: invoiceSourceEmailSchema,
 
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,

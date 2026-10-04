@@ -28,8 +28,7 @@ export const ATTENTION_LINKS = {
   toPay: '/invoices?status=unpaid',
   overdue: '/invoices?status=unpaid&due=overdue',
   dueSoon: '/invoices?status=unpaid&due=soon',
-  // There is no "extraction failed" filter; its error flag is what "Errors only" finds.
-  extractionFailed: '/invoices?hasErrors=true',
+  extractionFailed: '/invoices?extraction=failed',
 } as const;
 
 type SentenceData = Pick<

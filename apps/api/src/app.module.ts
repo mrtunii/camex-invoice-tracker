@@ -9,6 +9,7 @@ import { HealthController } from './health/health.controller.js';
 import { InboxModule } from './inbox/inbox.module.js';
 import { IngestionModule } from './ingestion/ingestion.module.js';
 import { InvoicesModule } from './invoices/invoices.module.js';
+import { WorkflowModule } from './invoices/workflow/workflow.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { loggerParams } from './logging.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -34,6 +35,7 @@ export class AppModule {
         IngestionModule,
         InboxModule,
         InvoicesModule,
+        WorkflowModule,
         VendorsModule,
         DashboardModule,
       ],

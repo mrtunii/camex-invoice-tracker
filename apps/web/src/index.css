@@ -67,7 +67,7 @@
     --accent-foreground: oklch(100% 0 0);
     --danger: oklch(54.04% 0.1765 28.56); /* warning #C0362C */
     --danger-foreground: oklch(100% 0 0);
-    --warning: oklch(56.66% 0.1268 65.3); /* caution #A86400 */
+    --warning: oklch(54.8% 0.1231 64.83); /* caution #A15F00 (4.63:1 on the canvas) */
     --warning-foreground: oklch(100% 0 0);
     --success: oklch(51.89% 0.1072 153.02); /* ok      #2D7A4A */
     --success-foreground: oklch(100% 0 0);
@@ -162,6 +162,12 @@
   .toggle-button-group:not(.toggle-button-group--detached) > .toggle-button:last-child {
     border-start-end-radius: var(--radius-control);
     border-end-end-radius: var(--radius-control);
+  }
+
+  /* The invoice page's sticky action bar is at the bottom right too: toasts appear above it,
+     never over Approve or Mark paid. */
+  body:has([data-action-bar]) .toast-region--bottom-end {
+    bottom: calc(var(--spacing) * 4 + 4.5rem);
   }
 
   /* An unselected switch must still be visible: ~3:1 against the canvas (WCAG 1.4.11). */

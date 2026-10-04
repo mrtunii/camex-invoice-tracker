@@ -119,27 +119,30 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 - notes (anything a payer must know, e.g. late interest)
 - flags jsonb: `[{code, severity: error|warning|info, field, message}]` — recomputed on every change
 - workflow: approved_at, approved_by_id, paid_at (date), paid_by_id, payment_reference, payment_note, rejected_at, rejected_by_id, rejection_reason (`duplicate | not_invoice | disputed | other`), rejection_note
+- version int not null default 0: optimistic concurrency (§6). Every human write (an edit, a transition, linking a vendor, trusting bank details) checks it and increments it; the evaluator and the extraction worker don't.
 - created_at, updated_at
 - indexes: status, due_date, vendor_id, (vendor_id, invoice_number), file_sha256
 
-**invoice_events** — append-only. id, invoice_id, user_id (null = system), type (`received | extracted | extraction_failed | edited | approved | rejected | paid | payment_undone | reopened | reextracted | vendor_linked | bank_account_trusted`), data jsonb (for `edited`: `{field: {from, to}}`), created_at
+**invoice_events** — append-only. id, invoice_id, user_id (null = system), type (`received | extracted | extraction_failed | edited | approved | rejected | paid | payment_undone | reopened | reextracted | vendor_linked | bank_account_trusted`), data jsonb (for `edited`: `{field: {from, to}}`, changed fields only, bank details and line items with their values), created_at (`clock_timestamp()`, so events of one transaction keep their order)
 
 ## 6. Statuses and transitions
 
 | From | To | Trigger | Rule |
 |---|---|---|---|
 | processing | needs_review | system | extraction finished (success or failure) |
-| needs_review | unpaid | Approve | required: vendor_name, invoice_number, invoice_date, due_date, amount_due, amount_due_currency. Error flags block unless user confirms "approve anyway" (recorded in the event). |
-| needs_review | rejected | Reject | reason required |
-| needs_review | processing | Re-extract | overwrites extracted fields; confirm first |
-| unpaid | paid | Mark paid | paid_at required; reference/note optional |
-| unpaid | needs_review | Reopen | to correct data |
-| paid | unpaid | Undo payment | |
-| rejected | needs_review | Reopen | |
+| needs_review | needs_review | Edit (`PATCH /api/invoices/:id`) | any subset of the extracted fields, normalized like the extraction; writes `edited` with the changed fields only. Setting the due date makes its source `manual`; clearing it lets it be derived again (§7). |
+| needs_review | unpaid | Approve | re-evaluated first, in the transaction. Required (never overridable): vendor_name, invoice_number, invoice_date, due_date, amount_due, amount_due_currency (`MISSING_REQUIRED`). A **vendor must be linked** (`VENDOR_REQUIRED`). Error flags need `confirmErrors` ("approve anyway"; `CONFIRM_REQUIRED` otherwise), recorded as `approved {overriddenFlags}`. Optional `trustBankDetails` trusts the invoice's account for the vendor in the same transaction (§9). |
+| needs_review | rejected | Reject | reason required; a note required for `other` |
+| needs_review | processing | Re-extract | confirm first. The new reading overwrites every extracted field, edits included, and resets due_date_source; the vendor link is kept. Increments `version`. |
+| unpaid | paid | Mark paid | paid_at required (≤ today, Tbilisi); reference/note optional. Re-evaluated first: error flags (e.g. BANK_UNKNOWN after a trusted account was removed) need `confirmErrors`, as on approve. |
+| unpaid | needs_review | Reopen | to correct data; clears the approval |
+| paid | unpaid | Undo payment | clears the payment fields |
+| rejected | needs_review | Reopen | clears the rejection |
 
 - Fields are editable only in `needs_review`. Each save writes an `edited` event with a diff.
+- **Optimistic concurrency:** every write request carries the invoice's `version`; a mismatch is 409 `STALE` ("Someone else changed this invoice. Reload to see their changes."). An action from a wrong status is 409 `INVALID_TRANSITION`. 409 bodies: `{statusCode, code, message, fields?, flags?, status?}`.
 - **Overdue** = `unpaid` and due_date < today (Tbilisi). Not a status. **Due soon** = `unpaid` and due today … today + 7 days (one window everywhere: `dueState: soon`, the list's This week filter, Home). Dispute deadlines keep their own 3 days (DISPUTE_SOON, §8).
-- Transitions live in one server-side state machine module, not scattered in controllers. Every transition writes an event.
+- Transitions live in one server-side state machine module (`apps/api/src/invoices/workflow/`: the table as data, one service applying it), not scattered in controllers. Every action runs in one transaction with a row lock, checks status and version, writes its event with the user and re-evaluates the invoice; the related invoices (same file or invoice number, including the old number after an edit) are re-evaluated after commit.
 
 ## 7. Extraction
 
@@ -171,7 +174,7 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 
 Recomputed after extraction (success or final failure, in the same transaction as the extraction write: a `needs_review` invoice never exists without its flags; if evaluation fails, the write rolls back and the job retries), after every edit, after every vendor change (for that vendor's `needs_review` and `unpaid` invoices; a new vendor or a changed name, alias or domain also re-matches unlinked `needs_review` invoices), and daily at 00:05 Asia/Tbilisi for every `needs_review` and `unpaid` invoice (DISPUTE_SOON and FUTURE_DATE depend on the date). No flags while `processing`. Money tolerance: |diff| ≤ max(0.05, 0.01% of expected), decimal arithmetic only.
 
-Each flag is `{code, severity, field, message}`. `field` is the camelCase path of the field it is about, for the review UI to focus (`dueDate`, `totalAmount`, `lineItems.1.amount`, `bankDetails.iban`), or null. Flags are ordered errors, then warnings, then info (table order within a severity). Messages are plain English and never contain bank account numbers.
+Each flag is `{code, severity, field, message}`. `field` is the camelCase path of the field it is about, for the review UI to focus (`dueDate`, `totalAmount`, `lineItems.1.amount`, `bankDetails.iban`), or null. Flags are ordered errors, then warnings, then info (table order within a severity). Messages are plain English, with dates as people write them ("Dispute window ends 6 Oct 2026"), and never contain bank account numbers; they are rewritten whenever the invoice is evaluated.
 
 | Code | Severity | Rule |
 |---|---|---|
@@ -222,23 +225,24 @@ HeroUI v3 (React Aria + Tailwind v4) with one design system; details and example
 **Layout:** a 224 px sidebar (icons only below 1024 px, a drawer below 640 px): Home, Invoices, Inbox, Vendors; at the bottom Team and the user menu (theme, change password, sign out). Content left-aligned, at most 1280 px. Page header: the title and at most one primary action. Each page is its own lazily loaded chunk.
 
 **Home `/`** (`GET /api/dashboard?month&currency`)
-- The status sentence (30 px, the one bold element), built from the data, only clauses with something to say: invoices to review and the most urgent dispute deadline (within 3 days); overdue payments, else payments due this week; extraction failures. "Nothing needs attention." otherwise. Numbers link to the matching list.
+- The status sentence (30 px, the one bold element), built from the data, only clauses with something to say: invoices to review and the most urgent dispute deadline (within 3 days); overdue payments, else payments due this week; extraction failures (linked to the list's `extraction=failed` filter). Passed dispute windows stay out of the sentence. "Nothing needs attention." otherwise. Numbers link to the matching list.
 - To review / To pay panels: up to 5 rows in the list's default order (vendor, amount, one line of why) and View all.
-- Month ledger (month picker, default this month in Tbilisi), one column per currency, amount and count: Invoiced (`unpaid`/`paid`, invoice_date in the month) · Paid (`paid`, paid_at in the month) · To pay (the month's invoiced still `unpaid`) · To review (`needs_review`, invoice_date in the month).
-- Last 12 months: invoiced and paid per month for one currency (default: most invoiced in the period), Recharts bars with a hidden table. By category / Top vendors: top 5 of the month's invoiced in that currency. Every sum in SQL.
+- Month ledger (month picker, default this month in Tbilisi), one column per currency, amount and count (the count smaller, on the same line): Invoiced (`unpaid`/`paid`, invoice_date in the month) · Paid (`paid`, paid_at in the month) · To pay (the month's invoiced still `unpaid`) · To review (`needs_review`, invoice_date in the month).
+- The 12 months ending at the picked month (beside the ledger from 1024 px): invoiced and paid per month for one currency (default: most invoiced in those months), Recharts bars drawn at the panel's measured width, with a hidden table. By category / Top vendors: top 5 of the month's invoiced in that currency. Every sum in SQL.
 
 **Invoices list `/invoices`**
 - Tabs with counts: To review (also holds `processing`) · To pay · Paid · Rejected · All.
-- Filters on one row: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range, Errors only (behind a Filters popover on narrow screens). To pay: All · Overdue · This week (the API's `due` filter). Above the table one quiet line of totals for the tab and filters ("8 invoices · 35,153.08 USD · 88,753.98 GEL"). CSV export of the current tab, filter and sort (UTF-8 with BOM, at most 10,000 rows). Upload PDFs (drag & drop).
+- Filters on one row: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range, Errors only (behind a Filters popover on narrow screens); `extraction=failed` ("Couldn't be read", reached from Home) shows as a switch while it applies. To pay: All · Overdue · This week (the API's `due` filter). Above the table one quiet line of totals for the tab and filters ("8 invoices · 35,153.08 USD · 88,753.98 GEL"). CSV export of the current tab, filter and sort (UTF-8 with BOM, at most 10,000 rows). Upload PDFs (drag & drop).
 - Columns: received, vendor, invoice #, invoice date, due (red overdue, amber due soon), amount due + currency, category, location, flag icon; plus dispute by (To review), paid on (Paid), status (All). Sortable headers, pagination.
 - Default sort: To review → dispute_deadline asc, then received asc · To pay → due_date asc · Paid → paid_at desc · Rejected, All → received desc. Nulls sort last; ties break by received, then id (stable pages).
 - Tab, filters, sort and page live in the URL. API: `GET /api/invoices`, `GET /api/invoices/summary` (tab counts), `GET /api/invoices/export.csv`.
 
-**Invoice detail `/invoices/:id` — split view** (T06; until then an interim page with the essentials and Open PDF)
-- Left (~55%, resizable): PDF via pdf.js/react-pdf; page nav, zoom, fit width, download, open in new tab.
-- Right: header (vendor, invoice #, status, amount due prominent) · flags panel (errors first; field-linked flags focus that field on click) · form sections: Document · Dates & terms · Amounts · Operation · Line items (editable table) · Bank details · Notes. Read-only outside `needs_review`. Fields that differ from the extraction show an "edited" marker.
-- Sticky action bar by status: needs_review → Save, Approve, Approve & next, Reject, Re-extract · unpaid → Mark paid, Reopen · paid → Undo payment · rejected → Reopen.
-- Below: Source email (from, subject, received, body, ignored attachments) and Activity timeline.
+**Invoice detail `/invoices/:id`** (T06)
+- ≥ 1024 px: a resizable split (react-resizable-panels; the ratio is remembered in the browser), the PDF left (55 % by default), the data right. Below 1024 px: two tabs, Document and Details. The back link returns to the list as it was (history back when the list opened it).
+- PDF (react-pdf / pdf.js, worker bundled by Vite, loaded from the API with credentials): page navigation, zoom, fit width (default), rotate 90°, download, open in a new tab; if it can't be rendered, a plain message keeps the download.
+- Right pane, top to bottom: header (vendor, or the extracted name with "Link vendor"; invoice # in Mono; status word; amount due at 30 px; one line of state in words) · issues (errors and warnings in their colour, each focusing its field; info flags in a quiet "For your information" line) · the form in review order (Summary · Amounts · Dates & terms · Bank details · Line items with a live total and difference · Operation · Notes); an edited field shows "Extracted: … · Restore"; outside `needs_review` the data is a read-only definition list · payment details with copy buttons (`unpaid`, `paid`; bank warnings above) · source email (body on demand) · activity, newest first, in sentences.
+- Sticky action bar: needs_review → Approve ("Save & approve" with unsaved edits), Save (when edited), Approve & next, More: Reject, Re-extract · unpaid → Mark paid, More: Reopen · paid → Undo payment · rejected → Reopen. Ctrl/Cmd+S saves; leaving with unsaved edits asks first; a 409 STALE shows the message and Reload, keeping the edits on screen.
+- Approve acts at once unless something needs a decision; then a dialog shows only the steps that apply: link or create the vendor · trust first-seen bank details (unchecked by default) · the BANK_UNKNOWN warning · other error flags with "I've checked these and want to approve anyway". Missing required fields keep Approve disabled (reason in a tooltip). Approve and Mark paid toast with Undo. Approve & next opens the next invoice to review (`GET /api/invoices/next-to-review`), or To review with "All caught up".
 
 **Inbox `/inbox`** — log of inbound emails: received, from, subject, links to resulting invoices (file name, status word, flag icon), ignored attachments; the email opens in a drawer.
 

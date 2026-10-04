@@ -7,20 +7,10 @@ import {
   type InboxListResponse,
   emailHeadersSchema,
 } from '@camex/shared';
-import { z } from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
 import { flagSummariesFromJson } from '../invoices/invoice-columns.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-
-/** inbound_emails.attachments as stored (snake_case, SPEC §5). */
-const storedAttachmentsSchema = z.array(
-  z.object({
-    filename: z.string(),
-    content_type: z.string(),
-    size: z.number(),
-    processed: z.boolean(),
-  }),
-);
+import { attachmentsFromJson } from './stored-attachments.js';
 
 const emailSelect = {
   id: true,
@@ -89,16 +79,11 @@ export class InboxService {
   }
 
   private attachments(row: EmailRow): InboundAttachment[] {
-    const parsed = storedAttachmentsSchema.safeParse(row.attachments);
-    if (!parsed.success) {
+    const attachments = attachmentsFromJson(row.attachments);
+    if (attachments === null) {
       this.logger.warn({ inboundEmailId: row.id }, 'unreadable attachments column');
       return [];
     }
-    return parsed.data.map((a) => ({
-      filename: a.filename,
-      contentType: a.content_type,
-      size: a.size,
-      processed: a.processed,
-    }));
+    return attachments;
   }
 }

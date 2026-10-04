@@ -56,7 +56,7 @@ describe('pnpm seed:demo', () => {
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
     expect(result.stdout).toMatch(
-      /8 vendors, 28 invoices: 4 to review, 6 to pay, 17 paid, 1 rejected/,
+      /8 vendors, 29 invoices: 5 to review, 6 to pay, 17 paid, 1 rejected/,
     );
 
     const invoices = await t.prisma.invoice.findMany({
@@ -70,16 +70,30 @@ describe('pnpm seed:demo', () => {
         flags: true,
       },
     });
-    expect(invoices).toHaveLength(28);
-    // Nothing left for the extractor, and no DUPLICATE_FILE: every PDF differs.
+    expect(invoices).toHaveLength(29);
+    // Nothing left for the extractor. Every PDF differs except ASM's reminder copy (T06's
+    // "reject a duplicate"): it and the unpaid original are flagged, nothing else is.
     expect(invoices.some((i) => i.status === 'processing')).toBe(false);
     expect(new Set(invoices.map((i) => i.fileSha256)).size).toBe(28);
-    expect(invoices.flatMap((i) => flagCodes(i.flags))).not.toContain('DUPLICATE_FILE');
+    const duplicates = invoices.filter((i) => flagCodes(i.flags).includes('DUPLICATE_FILE'));
+    expect(duplicates.map((i) => i.status).sort()).toEqual(['needs_review', 'unpaid']);
+    for (const duplicate of duplicates) {
+      expect(flagCodes(duplicate.flags)).toContain('DUPLICATE_NUMBER');
+    }
     for (const invoice of invoices.filter((i) => i.status === 'paid')) {
       expect(invoice).toMatchObject({ approvedById: user.id, paidAt: expect.any(Date) });
       expect(invoice.paymentReference).not.toBeNull();
     }
     expect(invoices.find((i) => i.status === 'rejected')?.rejectionReason).toBe('not_invoice');
+    // The unmatched vendor's invoice prints bank details: approving it can create and trust.
+    const kolkhi = await t.prisma.invoice.findFirstOrThrow({
+      where: { vendorName: 'Kolkhi Aviation Services LLC' },
+    });
+    expect(kolkhi).toMatchObject({
+      status: 'needs_review',
+      vendorId: null,
+      bankDetails: expect.objectContaining({ iban: 'GE47TB0000000367812945' }),
+    });
 
     const cookie = await login(t, 'clerk@camex.aero');
     const get = (path: string) => t.http().get(path).set('Cookie', cookie).expect(200);
@@ -88,7 +102,7 @@ describe('pnpm seed:demo', () => {
     expect(dashboard.currency).toBe('USD');
     expect(dashboard.currencies).toEqual(['USD', 'GEL']);
     expect(dashboard.attention).toMatchObject({
-      toReview: { count: 4 },
+      toReview: { count: 5 },
       toPay: { count: 6 },
       disputeSoonCount: 1,
       overdueCount: 3,
@@ -123,7 +137,7 @@ describe('pnpm seed:demo', () => {
     // A second run refuses: the database is no longer empty, and nothing is added.
     const again = await seedDemo();
     expect(again.code).toBe(1);
-    expect(again.stderr).toMatch(/already has 28 invoice\(s\) and 8 vendor\(s\)/);
-    expect(await t.prisma.invoice.count()).toBe(28);
+    expect(again.stderr).toMatch(/already has 29 invoice\(s\) and 8 vendor\(s\)/);
+    expect(await t.prisma.invoice.count()).toBe(29);
   });
 });

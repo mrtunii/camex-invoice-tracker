@@ -95,7 +95,7 @@ describe('GET /api/invoices/:id', () => {
           code: 'DISPUTE_SOON',
           severity: 'warning',
           field: 'disputeDeadline',
-          message: 'Dispute window ended 2026-09-30',
+          message: 'Dispute window ended 30 Sep 2026',
         },
         {
           code: 'NEW_VENDOR',
@@ -109,6 +109,51 @@ describe('GET /api/invoices/:id', () => {
     expect(res.body.totalAmount).toBe('15617.79');
     expect(res.body.lineItems).toEqual(lineItems);
     expect(res.body.bankDetails).toEqual(bankDetails);
+
+    // T06: the version, the model's normalized reading, the workflow fields and the source email.
+    expect(res.body).toMatchObject({
+      version: 0,
+      extracted: expectedExtraction('asm'),
+      approvedAt: null,
+      approvedBy: null,
+      paidAt: null,
+      paidBy: null,
+      paymentReference: null,
+      paymentNote: null,
+      rejectedAt: null,
+      rejectedBy: null,
+      rejectionReason: null,
+      rejectionNote: null,
+      email: {
+        id: inboundEmailId,
+        provider: 'mailgun',
+        fromAddress: 'billing@vendor.example',
+        subject: 'Invoice 42',
+        receivedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        uploadedBy: null,
+        ignoredAttachments: [],
+      },
+    });
+  });
+
+  it('lists the attachments that were not PDFs with the source email', async () => {
+    const res = await postMailgun(t, {
+      attachments: [
+        { filename: 'asm.pdf', contentType: 'application/pdf', data: fixture('asm.pdf') },
+        { filename: 'notes.txt', contentType: 'text/plain', data: Buffer.from('hello') },
+      ],
+    }).expect(200);
+    const invoiceId = res.body.invoiceIds[0] as string;
+    const detail = await t
+      .http()
+      .get(`/api/invoices/${invoiceId}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(detail.body.email.ignoredAttachments).toEqual([
+      { filename: 'notes.txt', contentType: 'text/plain', size: 5 },
+    ]);
+    // Still being read: no reading to compare with yet.
+    expect(detail.body.extracted).toBeNull();
   });
 
   it('shows a failed extraction with its error and empty fields', async () => {
@@ -130,6 +175,7 @@ describe('GET /api/invoices/:id', () => {
     expect(detail.body).toMatchObject({
       extractionStatus: 'failed',
       extractionError: 'boom',
+      extracted: null,
       documentType: null,
       category: null,
       lineItems: [],

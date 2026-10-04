@@ -171,23 +171,25 @@ export function HomePage() {
         />
       </div>
 
-      <MonthLedger
-        month={shownMonth}
-        ledger={data.ledger}
-        isCurrentMonth={shownMonth >= currentMonth}
-        loading={dashboard.isPlaceholderData}
-        onMonth={(step) => {
-          // From the URL, not the response: a second click while a month loads still moves on.
-          const next = addMonths(shownMonth, step);
-          setParam('month', next === currentMonth ? null : next);
-        }}
-      />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <MonthLedger
+          month={shownMonth}
+          ledger={data.ledger}
+          isCurrentMonth={shownMonth >= currentMonth}
+          loading={dashboard.isPlaceholderData}
+          onMonth={(step) => {
+            // From the URL, not the response: a second click while a month loads still moves on.
+            const next = addMonths(shownMonth, step);
+            setParam('month', next === currentMonth ? null : next);
+          }}
+        />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <Panel as="section" aria-labelledby="trend-heading" className="p-4">
+        <Panel as="section" aria-labelledby="trend-heading" className="flex flex-col p-4">
           <header className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <h2 id="trend-heading" className="text-base font-semibold">
-              Last 12 months
+              {shownMonth >= currentMonth
+                ? 'Last 12 months'
+                : `12 months to ${formatMonth(shownMonth)}`}
             </h2>
             {currencyChoices.length > 0 && (
               <Select
@@ -214,7 +216,7 @@ export function HomePage() {
             )}
           </header>
           {data.currency === null ? (
-            <p className="text-muted">Nothing invoiced in the last 12 months yet.</p>
+            <p className="text-muted">Nothing invoiced in these 12 months.</p>
           ) : (
             <>
               <p className="mb-2 flex gap-4 text-xs text-muted" aria-hidden>
@@ -237,6 +239,9 @@ export function HomePage() {
             </>
           )}
         </Panel>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
         <RankedList
           title="By category"
           rows={categoryRows(data.categories)}

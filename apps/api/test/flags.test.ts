@@ -4,6 +4,7 @@ import {
   type FlagCode,
   type InvoiceFlag,
   bankAccountKey,
+  humanDate,
 } from '@camex/shared';
 import { describe, expect, it } from 'vitest';
 import { deriveDates } from '../src/evaluation/derive-dates.js';
@@ -378,7 +379,7 @@ describe('computeFlags', () => {
         code: 'DUE_BEFORE_INVOICE',
         severity: 'error',
         field: 'dueDate',
-        message: 'Due date 2026-09-19 is before the invoice date 2026-09-20',
+        message: 'Due date 19 Sep 2026 is before the invoice date 20 Sep 2026',
       },
     ]);
     expect(codes(flags(clean({ dueDate: '2026-09-20', paymentTermsDays: 0 })))).not.toContain(
@@ -392,7 +393,7 @@ describe('computeFlags', () => {
         code: 'TERMS_MISMATCH',
         severity: 'warning',
         field: 'dueDate',
-        message: "Printed due date 2026-10-20 doesn't match the 7 days terms (2026-09-27)",
+        message: "Printed due date 20 Oct 2026 doesn't match the 7 days terms (27 Sep 2026)",
       },
     ]);
     expect(codes(flags(clean({ paymentTermsDays: 30 })))).not.toContain('TERMS_MISMATCH');
@@ -432,7 +433,7 @@ describe('computeFlags', () => {
         code: 'FUTURE_DATE',
         severity: 'warning',
         field: 'invoiceDate',
-        message: 'Invoice date 2026-10-03 is in the future',
+        message: 'Invoice date 3 Oct 2026 is in the future',
       },
     ]);
     expect(
@@ -446,7 +447,7 @@ describe('computeFlags', () => {
         code: 'SERVICE_AFTER_INVOICE',
         severity: 'warning',
         field: 'serviceDate',
-        message: 'Service date 2026-09-21 is after the invoice date 2026-09-20',
+        message: 'Service date 21 Sep 2026 is after the invoice date 20 Sep 2026',
       },
     ]);
     expect(codes(flags(clean({ serviceDate: '2026-09-20' })))).not.toContain(
@@ -669,11 +670,11 @@ describe('computeFlags', () => {
           code: 'DISPUTE_SOON',
           severity: 'warning',
           field: 'disputeDeadline',
-          message: 'Dispute window ends 2026-10-05',
+          message: 'Dispute window ends 5 Oct 2026',
         },
       ]);
       expect(only(flags(clean({ disputeDeadline: TODAY })), 'DISPUTE_SOON')[0]?.message).toBe(
-        'Dispute window ends 2026-10-02',
+        'Dispute window ends 2 Oct 2026',
       );
       expect(flags(clean({ disputeDeadline: '2026-10-06' }))).toEqual([]);
     });
@@ -681,7 +682,7 @@ describe('computeFlags', () => {
     it('already passed: "ended"', () => {
       expect(
         only(flags(clean({ disputeDeadline: '2026-09-30' })), 'DISPUTE_SOON')[0]?.message,
-      ).toBe('Dispute window ended 2026-09-30');
+      ).toBe('Dispute window ended 30 Sep 2026');
     });
 
     it('only in needs_review', () => {
@@ -822,7 +823,7 @@ const disputeEnded = (date: string) => ({
   code: 'DISPUTE_SOON',
   severity: 'warning',
   field: 'disputeDeadline',
-  message: `Dispute window ended ${date}`,
+  message: `Dispute window ended ${humanDate(date)}`,
 });
 const payInGel = {
   code: 'PAY_IN_OTHER_CURRENCY',

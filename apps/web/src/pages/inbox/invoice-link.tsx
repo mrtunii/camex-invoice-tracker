@@ -2,7 +2,7 @@ import type { InboxInvoice } from '@camex/shared';
 import { Link, cn } from '@heroui/react';
 import { FlagIcon } from '@/components/flag-icon';
 import { Reading } from '@/components/status-word';
-import { TruncatedText } from '@/components/truncated-text';
+import { WrappingIdentifier } from '@/components/wrapping-identifier';
 import { STATUS_WORDS } from '@/lib/invoice-labels';
 
 /**
@@ -13,7 +13,7 @@ export function InvoiceLink({ invoice, className }: { invoice: InboxInvoice; cla
   return (
     <span className={cn('flex min-w-0 items-center gap-2', className)}>
       <Link href={`/invoices/${invoice.id}`} className="min-w-0 text-sm text-primary">
-        <TruncatedText text={invoice.fileName} />
+        <WrappingIdentifier text={invoice.fileName} />
       </Link>
       {invoice.status === 'processing' ? (
         <Reading className="shrink-0 text-xs" />

@@ -12,6 +12,7 @@ import {
   addDays,
   bankAccountKey,
   daysBetween,
+  humanDate,
   invoiceNumberKey,
   vendorKey,
 } from '@camex/shared';
@@ -192,7 +193,7 @@ function dateFlags(invoice: FlagInvoice, today: string, add: AddFlag): void {
     add(
       'DUE_BEFORE_INVOICE',
       'dueDate',
-      `Due date ${dueDate} is before the invoice date ${invoiceDate}`,
+      `Due date ${humanDate(dueDate)} is before the invoice date ${humanDate(invoiceDate)}`,
     );
   }
   if (
@@ -206,7 +207,7 @@ function dateFlags(invoice: FlagInvoice, today: string, add: AddFlag): void {
       add(
         'TERMS_MISMATCH',
         'dueDate',
-        `Printed due date ${dueDate} doesn't match the ${days(invoice.paymentTermsDays)} terms (${expected})`,
+        `Printed due date ${humanDate(dueDate)} doesn't match the ${days(invoice.paymentTermsDays)} terms (${humanDate(expected)})`,
       );
     }
   }
@@ -223,13 +224,13 @@ function dateFlags(invoice: FlagInvoice, today: string, add: AddFlag): void {
     );
   }
   if (invoiceDate !== null && invoiceDate > today) {
-    add('FUTURE_DATE', 'invoiceDate', `Invoice date ${invoiceDate} is in the future`);
+    add('FUTURE_DATE', 'invoiceDate', `Invoice date ${humanDate(invoiceDate)} is in the future`);
   }
   if (serviceDate !== null && invoiceDate !== null && serviceDate > invoiceDate) {
     add(
       'SERVICE_AFTER_INVOICE',
       'serviceDate',
-      `Service date ${serviceDate} is after the invoice date ${invoiceDate}`,
+      `Service date ${humanDate(serviceDate)} is after the invoice date ${humanDate(invoiceDate)}`,
     );
   }
 }
@@ -333,7 +334,9 @@ export function computeFlags(input: FlagInput, today: string): InvoiceFlag[] {
     add(
       'DISPUTE_SOON',
       'disputeDeadline',
-      deadline < today ? `Dispute window ended ${deadline}` : `Dispute window ends ${deadline}`,
+      deadline < today
+        ? `Dispute window ended ${humanDate(deadline)}`
+        : `Dispute window ends ${humanDate(deadline)}`,
     );
   }
 

@@ -378,7 +378,7 @@ describe('GET /api/dashboard', () => {
   });
 
   describe('trend and currency', () => {
-    it('12 months, oldest first, ending with the current month; empty months are zero', async () => {
+    it('12 months, oldest first, ending with the picked month (default: this one); empty months are zero', async () => {
       const invoiced = (invoiceDate: string, amountDue: string, extra: Seed = {}) =>
         seed({ status: 'unpaid', invoiceDate, amountDue, amountDueCurrency: 'USD', ...extra });
       await invoiced('2025-10-31', '1000'); // the 13th month back: outside
@@ -423,9 +423,57 @@ describe('GET /api/dashboard', () => {
       const result = await dashboard();
       expect(result.currency).toBe('USD');
       expect(result.trend).toEqual(expected);
-      // The month parameter moves the ledger, not the trend.
-      expect((await dashboard('month=2025-01')).trend).toEqual(expected);
-      expect((await dashboard('month=2026-03')).trend).toEqual(expected);
+      expect((await dashboard('month=2026-10')).trend).toEqual(expected);
+
+      // A picked month moves the window with it (T06 0b): 2025-04 … 2026-03. The 13th month back
+      // from October is in it now, the October invoice is not.
+      const march = await dashboard('month=2026-03');
+      const marchMonths = [
+        '2025-04',
+        '2025-05',
+        '2025-06',
+        '2025-07',
+        '2025-08',
+        '2025-09',
+        '2025-10',
+        ...TREND_MONTHS.slice(0, 5),
+      ];
+      expect(march.trend).toEqual(
+        emptyTrend(marchMonths).map((month) => {
+          switch (month.month) {
+            case '2025-09':
+              return { ...month, invoiced: '1.25', invoicedCount: 1 };
+            case '2025-10':
+              return { ...month, invoiced: '1000', invoicedCount: 1 };
+            case '2025-11':
+              return { ...month, invoiced: '10.5', invoicedCount: 1, paid: '1.25', paidCount: 1 };
+            case '2026-02':
+              return { ...month, invoiced: '20', invoicedCount: 1 };
+            case '2026-03':
+              return { ...month, invoiced: '0.3', invoicedCount: 2, paid: '20', paidCount: 1 };
+            default:
+              return month;
+          }
+        }),
+      );
+      // Nothing invoiced in the year up to January 2025: no currency to default to.
+      const empty = await dashboard('month=2025-01');
+      expect(empty.trend.map((m) => m.month)).toEqual([
+        '2024-02',
+        '2024-03',
+        '2024-04',
+        '2024-05',
+        '2024-06',
+        '2024-07',
+        '2024-08',
+        '2024-09',
+        '2024-10',
+        '2024-11',
+        '2024-12',
+        '2025-01',
+      ]);
+      expect(empty).toMatchObject({ currency: null, currencies: [] });
+      expect(empty.trend.every((m) => m.invoiced === '0' && m.paid === '0')).toBe(true);
       // Another currency has its own trend.
       const gel = await dashboard('currency=GEL');
       expect(gel.trend).toEqual(
@@ -619,7 +667,7 @@ describe('GET /api/dashboard', () => {
         flags: [
           { code: 'MISSING_REQUIRED', severity: 'error', message: 'Due date is missing' },
           { code: 'TOTAL_MATH', severity: 'error', message: 'Line items add up to 1.00' },
-          { code: 'DISPUTE_SOON', severity: 'warning', message: 'Dispute window ends 2026-10-03' },
+          { code: 'DISPUTE_SOON', severity: 'warning', message: 'Dispute window ends 3 Oct 2026' },
         ],
       });
       const unlinked = await seed({

@@ -39,6 +39,13 @@ export function formatTimestamp(iso: string | null): string {
   return `${formatDate(date)}, ${time}`;
 }
 
+/** ISO timestamp → '3 Oct, 14:02' in Tbilisi; the year only when it isn't this year's. */
+export function formatEventTime(iso: string, today: string): string {
+  const { date, time } = tbilisi(iso);
+  const full = formatDate(date);
+  return `${date.slice(0, 4) === today.slice(0, 4) ? full.slice(0, -5) : full}, ${time}`;
+}
+
 /** ISO timestamp → its Tbilisi day (relative when close, see formatDay) and time, separately. */
 export function formatTimestampParts(iso: string, today: string): { day: string; time: string } {
   const { date, time } = tbilisi(iso);

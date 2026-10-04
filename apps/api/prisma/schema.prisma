@@ -206,6 +206,9 @@ model Invoice {
   pageCount      Int?   @map("page_count")
 
   status InvoiceStatus @default(processing)
+  /// Optimistic concurrency (T06): every human write (edit or transition) checks and increments
+  /// it. The evaluator and the extraction worker don't touch it.
+  version Int @default(0)
 
   // extraction
   extractionStatus        ExtractionStatus @default(pending) @map("extraction_status")
@@ -306,7 +309,9 @@ model InvoiceEvent {
   type      InvoiceEventType
   /// For `edited`: {field: {from, to}}.
   data      Json             @default("{}")
-  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// clock_timestamp(), not now(): events written in one transaction (approve + trust, an edit and
+  /// the vendor match it caused) get increasing times, so the activity log keeps their order.
+  createdAt DateTime         @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
 
   invoice Invoice @relation(fields: [invoiceId], references: [id])
   user    User?   @relation(fields: [userId], references: [id])

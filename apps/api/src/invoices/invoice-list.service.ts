@@ -188,6 +188,19 @@ export class InvoiceListService {
     };
   }
 
+  /**
+   * "Approve & next" (T06): the first invoice in To review's default order that is ready for
+   * review (not still `processing`) and isn't `after`; null when none is left.
+   */
+  async nextToReview(after: string | undefined): Promise<string | null> {
+    const where = whereClause([
+      Prisma.sql`i.status = 'needs_review'`,
+      after === undefined ? null : Prisma.sql`i.id <> ${after}::uuid`,
+    ]);
+    const [id] = await this.orderedIds(where, orderByClause(resolveSort('needs_review', {})), 1, 0);
+    return id ?? null;
+  }
+
   /** The list's rows (same filters, status and sort) as CSV; refused above 10,000 rows. */
   async exportCsv(query: InvoiceExportQuery): Promise<{ fileName: string; content: string }> {
     const today = businessToday(this.clock);

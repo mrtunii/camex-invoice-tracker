@@ -361,6 +361,22 @@ export function InvoiceFilters({
         </Switch.Content>
       </Switch>
 
+      {/* Only reachable from Home's "couldn't be read" link; shown while it applies, to clear it. */}
+      {filters.extraction === 'failed' && (
+        <Switch
+          isSelected
+          onChange={(selected) => !selected && onChange({ extraction: null })}
+          className="ml-1"
+        >
+          <Switch.Content>
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            Couldn’t be read
+          </Switch.Content>
+        </Switch>
+      )}
+
       {hasActiveFilters(filters) && (
         <Button variant="ghost" onPress={() => onChange(NO_FILTERS)}>
           Clear filters

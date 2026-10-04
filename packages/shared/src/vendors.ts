@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoTimestampSchema, namedRefSchema, uuidSchema } from './common.js';
+import { invoiceVersionSchema } from './invoice-workflow.js';
 import { vendorKey } from './keys.js';
 
 /** Free mailbox providers: anyone can send from them, so they never identify a vendor. */
@@ -140,10 +141,14 @@ export const vendorConflictSchema = z.object({
 });
 export type VendorConflict = z.infer<typeof vendorConflictSchema>;
 
-/** POST /api/invoices/:id/vendor: link an existing vendor, or create one and link it. */
+/**
+ * POST /api/invoices/:id/vendor: link an existing vendor, or create one and link it. A human
+ * write on the invoice, so it carries the invoice's `version` (T06) and increments it.
+ */
 export const linkInvoiceVendorRequestSchema = z.union([
-  z.strictObject({ vendorId: uuidSchema }),
+  z.strictObject({ version: invoiceVersionSchema, vendorId: uuidSchema }),
   z.strictObject({
+    version: invoiceVersionSchema,
     create: z.strictObject({
       name: vendorNameSchema,
       defaultPaymentTermsDays: defaultPaymentTermsDaysSchema.optional(),
@@ -151,3 +156,10 @@ export const linkInvoiceVendorRequestSchema = z.union([
   }),
 ]);
 export type LinkInvoiceVendorRequest = z.infer<typeof linkInvoiceVendorRequestSchema>;
+
+/**
+ * POST /api/invoices/:id/trust-bank-details: `version` makes sure the details trusted are the
+ * ones the person looked at (an edit in between is 409 STALE). It increments the version too.
+ */
+export const trustBankDetailsRequestSchema = z.strictObject({ version: invoiceVersionSchema });
+export type TrustBankDetailsRequest = z.infer<typeof trustBankDetailsRequestSchema>;

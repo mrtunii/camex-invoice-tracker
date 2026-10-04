@@ -15,9 +15,8 @@ function Cell({ cell }: { cell: MoneyCell | undefined }) {
   if (cell === undefined) return <span className="text-muted">—</span>;
   return (
     <span className="tabular whitespace-nowrap">
-      {formatMoney(cell.amount)}{' '}
-      {/* On a phone the count goes under the amount, so two currencies fit without scrolling. */}
-      <span className="block text-muted sm:inline">({formatCount(cell.count)})</span>
+      {formatMoney(cell.amount)} {/* One line: the count smaller and muted after the amount. */}
+      <span className="text-xs text-muted">({formatCount(cell.count)})</span>
     </span>
   );
 }
@@ -50,7 +49,7 @@ export function MonthLedger({
   }));
 
   return (
-    <Panel as="section" aria-labelledby="ledger-heading" className="p-4">
+    <Panel as="section" aria-labelledby="ledger-heading" className="flex flex-col p-4">
       <header className="mb-3 flex items-center gap-1">
         <h2 id="ledger-heading" className="mr-2 text-base font-semibold" aria-live="polite">
           {formatMonth(month)}
@@ -83,10 +82,7 @@ export function MonthLedger({
             : `Nothing invoiced, paid or waiting for review in ${formatMonth(month)}.`}
         </p>
       ) : (
-        <Table
-          variant="secondary"
-          className={cn('max-w-2xl', loading && 'opacity-60 transition-opacity')}
-        >
+        <Table variant="secondary" className={cn(loading && 'opacity-60 transition-opacity')}>
           <Table.ScrollContainer>
             <Table.Content
               aria-label={`${formatMonth(month)} by currency`}
@@ -127,7 +123,7 @@ export function MonthLedger({
           </Table.ScrollContainer>
         </Table>
       )}
-      <p className="mt-3 text-xs text-muted">By invoice date; paid by payment date.</p>
+      <p className="mt-auto pt-3 text-xs text-muted">By invoice date; paid by payment date.</p>
     </Panel>
   );
 }

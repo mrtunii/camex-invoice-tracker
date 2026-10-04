@@ -22,7 +22,7 @@ import {
   Users,
 } from 'lucide-react';
 import { type ComponentType, Suspense, useState } from 'react';
-import { Outlet, useLocation } from 'react-router';
+import { Outlet, useLocation, useMatches } from 'react-router';
 import { AppToasts } from '@/components/app-toasts';
 import { ChangePasswordDialog } from '@/components/change-password-dialog';
 import { PageFallback } from '@/components/root-layout';
@@ -204,10 +204,19 @@ function Sidebar({ compact }: { compact: boolean }) {
 
 /**
  * The signed-in shell. A 224 px sidebar on the left; below 1024 px it shrinks to icons, and below
- * 640 px it becomes a drawer behind a menu button. Content is left-aligned, at most 1280 px wide.
+ * 640 px it becomes a drawer behind a menu button. Content is left-aligned, at most 1280 px wide,
+ * except on full-bleed routes (the invoice split view).
  */
 export function AppLayout() {
   const wide = useMediaQuery(WIDE, { initializeWithValue: true });
+  // A route can take the whole content area (the invoice split view) via `handle.fullBleed`.
+  const fullBleed = useMatches().some(
+    (match) =>
+      typeof match.handle === 'object' &&
+      match.handle !== null &&
+      'fullBleed' in match.handle &&
+      match.handle.fullBleed === true,
+  );
   // The drawer belongs to the page it was opened on: following a link in it closes it.
   const location = useLocation();
   const [openedOn, setOpenedOn] = useState<string | null>(null);
@@ -242,7 +251,11 @@ export function AppLayout() {
       </aside>
 
       <div className="min-w-0 flex-1">
-        <main className="max-w-[1280px] px-4 pt-6 pb-16 sm:px-8 sm:pt-8 lg:px-10">
+        <main
+          className={
+            fullBleed ? 'min-w-0' : 'max-w-[1280px] px-4 pt-6 pb-16 sm:px-8 sm:pt-8 lg:px-10'
+          }
+        >
           <Suspense fallback={<PageFallback />}>
             <Outlet />
           </Suspense>

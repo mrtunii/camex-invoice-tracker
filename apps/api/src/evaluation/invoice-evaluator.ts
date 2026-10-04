@@ -38,6 +38,11 @@ export interface EvaluationResult {
 
 const OPEN_STATUSES = ['needs_review', 'unpaid'] as const;
 
+export interface RelatedOptions {
+  /** The invoice number before the change that is being evaluated. */
+  previousInvoiceNumber?: string | null;
+}
+
 /**
  * The characters JS `\s` matches, as a Postgres regex class (`[[:space:]]` alone misses the
  * no-break and other Unicode spaces).
@@ -178,9 +183,11 @@ export class InvoiceEvaluator {
   /**
    * Run after the caller's commit: evaluates the invoice, then every other invoice sharing its
    * file hash or invoice number, each in its own transaction. Whichever of two concurrent
-   * duplicates commits last re-flags the other, so duplicates converge.
+   * duplicates commits last re-flags the other, so duplicates converge. `previousInvoiceNumber`
+   * (an edit or a re-extraction changed it) adds the invoices that shared the old number: their
+   * duplicate flag may have to clear.
    */
-  async evaluateWithRelated(invoiceId: string): Promise<void> {
+  async evaluateWithRelated(invoiceId: string, options: RelatedOptions = {}): Promise<void> {
     const today = this.today();
     await this.prisma.$transaction((tx) => this.evaluate(tx, invoiceId, today));
     const row = await this.prisma.invoice.findUnique({
@@ -188,18 +195,27 @@ export class InvoiceEvaluator {
       select: { fileSha256: true, invoiceNumber: true },
     });
     if (!row) return;
-    for (const id of await this.relatedIds(this.prisma, invoiceId, row)) {
+    const ids = await this.relatedIds(this.prisma, invoiceId, row);
+    const previous = options.previousInvoiceNumber;
+    if (previous !== undefined && previous !== null && previous !== row.invoiceNumber) {
+      const before = { fileSha256: row.fileSha256, invoiceNumber: previous };
+      for (const id of await this.relatedIds(this.prisma, invoiceId, before)) {
+        if (!ids.includes(id)) ids.push(id);
+      }
+    }
+    for (const id of ids) {
       await this.prisma.$transaction((tx) => this.evaluate(tx, id, today));
     }
   }
 
   /**
    * evaluateWithRelated for triggers whose own write is already committed (extraction, vendor
-   * changes): a failure is logged, not thrown. The daily run or the next change catches up.
+   * changes, the workflow's actions): a failure is logged, not thrown. The daily run or the next
+   * change catches up.
    */
-  async tryEvaluateWithRelated(invoiceId: string): Promise<void> {
+  async tryEvaluateWithRelated(invoiceId: string, options: RelatedOptions = {}): Promise<void> {
     try {
-      await this.evaluateWithRelated(invoiceId);
+      await this.evaluateWithRelated(invoiceId, options);
     } catch (error) {
       this.logger.error(
         { invoiceId, err: error instanceof Error ? error.message : String(error) },

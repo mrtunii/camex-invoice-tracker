@@ -49,8 +49,10 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'invoices/:id',
+                // The split view uses the whole width and height (AppLayout drops its padding).
+                handle: { fullBleed: true },
                 element: page(
-                  () => import('@/pages/invoices/invoice-page'),
+                  () => import('@/pages/invoices/detail/invoice-detail-page'),
                   (m) => m.InvoicePage,
                 ),
               },

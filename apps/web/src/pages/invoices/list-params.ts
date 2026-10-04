@@ -2,12 +2,14 @@ import {
   DEFAULT_INVOICE_SORT,
   DEFAULT_SORT_ORDER,
   type DueFilter,
+  type ExtractionFilter,
   type InvoiceCategory,
   type InvoiceListStatus,
   type InvoiceSortKey,
   type SortOrder,
   currencyCodeSchema,
   dueFilterSchema,
+  extractionFilterSchema,
   invoiceCategorySchema,
   invoiceListStatusSchema,
   invoiceSortKeySchema,
@@ -30,6 +32,8 @@ export interface ListFilters {
   invoiceDateTo: string | null;
   hasErrors: boolean;
   due: DueFilter | null;
+  /** `failed`: only invoices whose PDF couldn't be read (Home's "couldn't be read" link). */
+  extraction: ExtractionFilter | null;
 }
 
 export interface ListParams extends ListFilters {
@@ -49,6 +53,7 @@ export const NO_FILTERS: ListFilters = {
   invoiceDateTo: null,
   hasErrors: false,
   due: null,
+  extraction: null,
 };
 
 const MIN_SEARCH = 2;
@@ -75,6 +80,7 @@ export function readListParams(search: URLSearchParams): ListParams {
     invoiceDateTo: from !== null && to !== null && to < from ? null : to,
     hasErrors: search.get('hasErrors') === 'true',
     due: one(dueFilterSchema, 'due'),
+    extraction: one(extractionFilterSchema, 'extraction'),
     sort: one(invoiceSortKeySchema, 'sort'),
     order: one(sortOrderSchema, 'order'),
     page: Number.isInteger(page) && page >= 1 ? page : 1,
@@ -91,6 +97,7 @@ function setFilters(target: URLSearchParams, filters: ListFilters, forApi: boole
   if (filters.invoiceDateTo) target.set('invoiceDateTo', filters.invoiceDateTo);
   if (filters.hasErrors) target.set('hasErrors', 'true');
   if (filters.due) target.set('due', filters.due);
+  if (filters.extraction) target.set('extraction', filters.extraction);
 }
 
 /** The page's URL query; defaults (Needs review, default sort, page 1) are left out. */
@@ -113,7 +120,8 @@ export function hasActiveFilters(filters: ListFilters): boolean {
     filters.invoiceDateFrom !== null ||
     filters.invoiceDateTo !== null ||
     filters.hasErrors ||
-    filters.due !== null
+    filters.due !== null ||
+    filters.extraction !== null
   );
 }
 

@@ -1,5 +1,6 @@
 import type { TrendMonth } from '@camex/shared';
-import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { useRef } from 'react';
+import { Bar, BarChart, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   abbreviateAmount,
   formatAmount,
@@ -7,6 +8,10 @@ import {
   formatMonth,
   formatShortMonth,
 } from '@/lib/format';
+import { useElementWidth } from '@/lib/use-element-width';
+
+/** Chart height in px; the width is the panel's. */
+const CHART_HEIGHT = 224;
 
 interface Point {
   month: string;
@@ -21,11 +26,14 @@ function MonthTick({
   y,
   payload,
   currentMonth,
+  selectedMonth,
 }: {
   x?: number;
   y?: number;
   payload?: { value: string };
   currentMonth: string;
+  /** The month picked above (the last bar), in ink. */
+  selectedMonth: string;
 }) {
   const month = payload?.value ?? '';
   const current = month === currentMonth;
@@ -34,7 +42,7 @@ function MonthTick({
       <text
         dy={14}
         textAnchor="middle"
-        className={current ? 'fill-foreground' : 'fill-muted'}
+        className={month === selectedMonth ? 'fill-foreground' : 'fill-muted'}
         fontSize={12}
       >
         {formatShortMonth(month)}
@@ -86,10 +94,16 @@ export function TrendChart({
   currency,
   currentMonth,
 }: {
+  /** 12 months ending at the picked month. */
   trend: TrendMonth[];
   currency: string;
   currentMonth: string;
 }) {
+  const selectedMonth = trend.at(-1)?.month ?? currentMonth;
+  // Drawn at exactly the measured width (no ResponsiveContainer, no viewBox scaling): T05b's
+  // 390 px screenshot caught the chart drawn at a fraction of its box.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(boxRef);
   const points: Point[] = trend.map((month) => ({
     month: month.month,
     invoicedValue: Number(month.invoiced),
@@ -99,9 +113,11 @@ export function TrendChart({
 
   return (
     <>
-      <div className="h-56 w-full" aria-hidden>
-        <ResponsiveContainer width="100%" height="100%">
+      <div ref={boxRef} className="w-full" style={{ height: CHART_HEIGHT }} aria-hidden>
+        {width > 0 && (
           <BarChart
+            width={width}
+            height={CHART_HEIGHT}
             data={points}
             barGap={2}
             barCategoryGap="22%"
@@ -116,7 +132,7 @@ export function TrendChart({
               tickLine={false}
               axisLine={{ stroke: 'currentColor' }}
               className="text-line"
-              tick={<MonthTick currentMonth={currentMonth} />}
+              tick={<MonthTick currentMonth={currentMonth} selectedMonth={selectedMonth} />}
             />
             <YAxis
               width={44}
@@ -149,7 +165,7 @@ export function TrendChart({
               isAnimationActive={false}
             />
           </BarChart>
-        </ResponsiveContainer>
+        )}
       </div>
 
       <div className="sr-only">

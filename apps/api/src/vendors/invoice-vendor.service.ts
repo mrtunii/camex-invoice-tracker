@@ -1,26 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import {
-  type InvoiceDetail,
-  type LinkInvoiceVendorRequest,
-  bankAccountKey,
-  vendorKey,
-} from '@camex/shared';
-import { InvoiceEvaluator, type Tx } from '../evaluation/invoice-evaluator.js';
-import { bankDetailsFromJson } from '../invoices/invoice-columns.js';
+import { type InvoiceDetail, type LinkInvoiceVendorRequest, vendorKey } from '@camex/shared';
+import { InvoiceEvaluator } from '../evaluation/invoice-evaluator.js';
 import { InvoicesService } from '../invoices/invoices.service.js';
+import { lockForAction } from '../invoices/workflow/workflow-guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import {
-  bankAccountsToJson,
-  parseBankAccounts,
-  storedAccountKey,
-  trustedAccountFrom,
-} from './bank-accounts.js';
+import { trustInvoiceBankDetails } from './trust-bank-details.js';
 import { assertUnique, lockVendors, vendorIdentitySelect, vendorKeys } from './vendor-rules.js';
 import { VendorsService } from './vendors.service.js';
-
-async function lockInvoice(tx: Tx, invoiceId: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${invoiceId}::uuid FOR UPDATE`;
-}
 
 /** The two vendor actions taken from an invoice: link a vendor, trust its bank details. */
 @Injectable()
@@ -35,7 +21,7 @@ export class InvoiceVendorService {
   /**
    * Links an existing or new vendor (needs_review only). The extracted vendor name becomes an
    * alias unless the vendor already answers to it or another vendor owns it, so the next invoice
-   * matches by itself.
+   * matches by itself. A human write on the invoice: checks and increments its version (T06).
    */
   async link(
     invoiceId: string,
@@ -44,15 +30,11 @@ export class InvoiceVendorService {
   ): Promise<InvoiceDetail> {
     const result = await this.prisma.$transaction(async (tx) => {
       await lockVendors(tx);
-      await lockInvoice(tx, invoiceId);
-      const invoice = await tx.invoice.findUnique({
+      await lockForAction(tx, invoiceId, 'linkVendor', body.version);
+      const invoice = await tx.invoice.findUniqueOrThrow({
         where: { id: invoiceId },
-        select: { status: true, vendorName: true },
+        select: { vendorName: true },
       });
-      if (!invoice) throw new NotFoundException('Invoice not found');
-      if (invoice.status !== 'needs_review') {
-        throw new ConflictException('A vendor can only be linked while the invoice needs review');
-      }
 
       const vendors = await tx.vendor.findMany({ select: vendorIdentitySelect });
       let vendor;
@@ -87,7 +69,10 @@ export class InvoiceVendorService {
         });
       }
 
-      await tx.invoice.update({ where: { id: invoiceId }, data: { vendorId: vendor.id } });
+      await tx.invoice.update({
+        where: { id: invoiceId },
+        data: { vendorId: vendor.id, version: { increment: 1 } },
+      });
       await tx.invoiceEvent.create({
         data: {
           invoiceId,
@@ -111,56 +96,39 @@ export class InvoiceVendorService {
 
   /**
    * Adds the invoice's bank details to its vendor's trusted accounts (needs_review or unpaid).
-   * An active account with the same key already counts: nothing changes.
+   * An active account with the same key already counts: nothing changes. `version` makes sure
+   * the details trusted are the ones the person saw; it is incremented when an account is added.
    */
-  async trustBankDetails(invoiceId: string, userId: string): Promise<InvoiceDetail> {
+  async trustBankDetails(
+    invoiceId: string,
+    version: number,
+    userId: string,
+  ): Promise<InvoiceDetail> {
     const result = await this.prisma.$transaction(async (tx) => {
       await lockVendors(tx);
-      await lockInvoice(tx, invoiceId);
-      const invoice = await tx.invoice.findUnique({
+      await lockForAction(tx, invoiceId, 'trustBankDetails', version);
+      const invoice = await tx.invoice.findUniqueOrThrow({
         where: { id: invoiceId },
-        select: { status: true, vendorId: true, bankDetails: true },
+        select: { vendorId: true, bankDetails: true },
       });
-      if (!invoice) throw new NotFoundException('Invoice not found');
-      if (invoice.status !== 'needs_review' && invoice.status !== 'unpaid') {
-        throw new ConflictException(
-          'Bank details can only be trusted on an invoice that needs review or is unpaid',
-        );
-      }
       if (invoice.vendorId === null) {
         throw new ConflictException(
           'Link the invoice to a vendor before trusting its bank details',
         );
       }
-      const details = bankDetailsFromJson(invoice.bankDetails);
-      const key = bankAccountKey(details);
-      if (details === null || key === null) {
-        throw new ConflictException('The invoice has no IBAN or account number to trust');
+      const { added } = await trustInvoiceBankDetails(tx, {
+        invoiceId,
+        vendorId: invoice.vendorId,
+        bankDetails: invoice.bankDetails,
+        userId,
+      });
+      if (added) {
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { version: { increment: 1 } },
+        });
       }
-
-      const vendor = await tx.vendor.findUniqueOrThrow({
-        where: { id: invoice.vendorId },
-        select: { bankAccounts: true },
-      });
-      const accounts = parseBankAccounts(vendor.bankAccounts);
-      const existing = accounts.find((a) => a.removed_at === null && storedAccountKey(a) === key);
-      if (existing) return { vendorId: invoice.vendorId, added: false };
-
-      const account = trustedAccountFrom(details, { invoiceId, userId, at: new Date() });
-      await tx.vendor.update({
-        where: { id: invoice.vendorId },
-        data: { bankAccounts: bankAccountsToJson([...accounts, account]) },
-      });
-      // Ids only: account numbers never go into event data.
-      await tx.invoiceEvent.create({
-        data: {
-          invoiceId,
-          userId,
-          type: 'bank_account_trusted',
-          data: { vendorId: invoice.vendorId, accountId: account.id },
-        },
-      });
-      return { vendorId: invoice.vendorId, added: true };
+      return { vendorId: invoice.vendorId, added };
     });
 
     if (result.added) {

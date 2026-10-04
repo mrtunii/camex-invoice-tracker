@@ -49,6 +49,7 @@ export class ExtractionHandler {
       where: { id: invoiceId },
       select: {
         status: true,
+        invoiceNumber: true,
         fileKey: true,
         fileName: true,
         inboundEmail: { select: { fromAddress: true, subject: true } },
@@ -68,7 +69,12 @@ export class ExtractionHandler {
         invoiceId,
       });
       const stored = await this.storeSuccess(invoiceId, result, normalizeExtraction(result.raw));
-      if (stored) await this.evaluator.tryEvaluateWithRelated(invoiceId);
+      // A re-extraction (T06) can change the number: its old duplicates are re-evaluated too.
+      if (stored) {
+        await this.evaluator.tryEvaluateWithRelated(invoiceId, {
+          previousInvoiceNumber: invoice.invoiceNumber,
+        });
+      }
       this.logger.log(
         {
           invoiceId,

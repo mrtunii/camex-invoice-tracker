@@ -51,3 +51,24 @@ export function dateUrgency(
   if (date < today) return 'passed';
   return date <= addDays(today, soonDays) ? 'soon' : null;
 }
+
+const MONTH_ABBREVIATIONS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** '2026-10-06' → '6 Oct 2026', for messages people read (flags). */
+export function humanDate(date: string): string {
+  const [year = '', month = '', day = ''] = date.split('-');
+  return `${String(Number(day))} ${MONTH_ABBREVIATIONS[Number(month) - 1] ?? '?'} ${year}`;
+}

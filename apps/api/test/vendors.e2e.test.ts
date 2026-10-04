@@ -55,6 +55,16 @@ describe('vendors API', () => {
     return t.prisma.invoice.findUniqueOrThrow({ where: { id } });
   }
 
+  /** The invoice's current version (T06: link and trust carry it). */
+  async function versionOf(id: string): Promise<number> {
+    const row = await t.prisma.invoice.findUnique({ where: { id }, select: { version: true } });
+    return row?.version ?? 0;
+  }
+  const linkVendor = async (id: string, body: object, status: number) =>
+    post(`/api/invoices/${id}/vendor`, { version: await versionOf(id), ...body }).expect(status);
+  const trust = async (id: string, status: number) =>
+    post(`/api/invoices/${id}/trust-bank-details`, { version: await versionOf(id) }).expect(status);
+
   describe('create, read, update, search', () => {
     it('creates a vendor; domains lowercased, repeated aliases and domains dropped', async () => {
       const res = await post('/api/vendors', {
@@ -356,7 +366,7 @@ describe('vendors API', () => {
       const vendorId = await createVendor({ name: 'AEG Fuels', emailDomains: ['aegfuels.com'] });
       expect((await invoiceRow(aeg)).vendorId).toBeNull(); // "AEG Fuels Ireland" ≠ "AEG Fuels"
 
-      const res = await post(`/api/invoices/${aeg}/vendor`, { vendorId }).expect(200);
+      const res = await linkVendor(aeg, { vendorId }, 200);
       expect(res.body).toMatchObject({
         vendorId,
         vendor: { id: vendorId, name: 'AEG Fuels' },
@@ -382,7 +392,7 @@ describe('vendors API', () => {
       const asm = await ingestFixture(t, 'asm');
       const vendorId = await createVendor({ name: 'Aviation Services Management FZE' });
       // Already linked by name; linking again records the manual link, aliases unchanged.
-      await post(`/api/invoices/${asm}/vendor`, { vendorId }).expect(200);
+      await linkVendor(asm, { vendorId }, 200);
       expect((await get(`/api/vendors/${vendorId}`).expect(200)).body.aliases).toEqual([]);
     });
 
@@ -392,9 +402,13 @@ describe('vendors API', () => {
         pdf: pdfVariant('aeg', '2'),
         wire: { invoiceNumber: '3110714' },
       });
-      const res = await post(`/api/invoices/${first}/vendor`, {
-        create: { name: 'AEG Fuels', defaultPaymentTermsDays: 7 },
-      }).expect(200);
+      const res = await linkVendor(
+        first,
+        {
+          create: { name: 'AEG Fuels', defaultPaymentTermsDays: 7 },
+        },
+        200,
+      );
       const vendorId = res.body.vendorId as string;
       const vendor = (await get(`/api/vendors/${vendorId}`).expect(200)).body;
       expect(vendor).toMatchObject({
@@ -414,7 +428,7 @@ describe('vendors API', () => {
       expect((await invoiceRow(aeg)).vendorId).toBe(owner);
 
       const vendorId = await createVendor({ name: 'AEG Fuels' });
-      const res = await post(`/api/invoices/${aeg}/vendor`, { vendorId }).expect(200);
+      const res = await linkVendor(aeg, { vendorId }, 200);
       expect(res.body.vendor).toEqual({ id: vendorId, name: 'AEG Fuels' });
       // No alias added: it would break uniqueness. The owner keeps its alias.
       expect((await get(`/api/vendors/${vendorId}`).expect(200)).body.aliases).toEqual([]);
@@ -423,17 +437,13 @@ describe('vendors API', () => {
       ]);
 
       // Creating a vendor whose own name is taken is still a 409.
-      const create = await post(`/api/invoices/${aeg}/vendor`, {
-        create: { name: 'AEG FUELS' },
-      }).expect(409);
+      const create = await linkVendor(aeg, { create: { name: 'AEG FUELS' } }, 409);
       expect(vendorConflictSchema.parse(create.body)).toMatchObject({
         field: 'create.name',
         vendor: { id: vendorId, name: 'AEG Fuels' },
       });
       // A new vendor whose name is free is linked, also without the owner's alias.
-      const created = await post(`/api/invoices/${aeg}/vendor`, {
-        create: { name: 'AEG Fuels Romania' },
-      }).expect(200);
+      const created = await linkVendor(aeg, { create: { name: 'AEG Fuels Romania' } }, 200);
       expect(created.body.vendor.name).toBe('AEG Fuels Romania');
       const romania = (await get(`/api/vendors/${created.body.vendorId as string}`).expect(200))
         .body;
@@ -445,11 +455,9 @@ describe('vendors API', () => {
       const vendorId = await createVendor({ name: 'AEG Fuels' });
       for (const status of ['processing', 'unpaid', 'paid', 'rejected'] as const) {
         await t.prisma.invoice.update({ where: { id: aeg }, data: { status } });
-        const blocked = await post(`/api/invoices/${aeg}/vendor`, { vendorId }).expect(409);
-        expect(blocked.body.message).toBe(
-          'A vendor can only be linked while the invoice needs review',
-        );
-        await post(`/api/invoices/${aeg}/vendor`, { create: { name: 'New One' } }).expect(409);
+        const blocked = await linkVendor(aeg, { vendorId }, 409);
+        expect(blocked.body).toMatchObject({ code: 'INVALID_TRANSITION', status });
+        await linkVendor(aeg, { create: { name: 'New One' } }, 409);
       }
       expect(await t.prisma.vendor.count()).toBe(1);
     });
@@ -458,10 +466,10 @@ describe('vendors API', () => {
       const aeg = await ingestFixture(t, 'aeg');
       await post(`/api/invoices/${aeg}/vendor`, {}).expect(400);
       await post(`/api/invoices/${aeg}/vendor`, { vendorId: 'x' }).expect(400);
-      await post(`/api/invoices/${aeg}/vendor`, {
-        vendorId: '00000000-0000-0000-0000-000000000000',
-      }).expect(404);
+      await post(`/api/invoices/${aeg}/vendor`, { version: 0 }).expect(400);
+      await linkVendor(aeg, { vendorId: '00000000-0000-0000-0000-000000000000' }, 404);
       await post('/api/invoices/00000000-0000-0000-0000-000000000000/vendor', {
+        version: 0,
         create: { name: 'X' },
       }).expect(404);
     });
@@ -498,7 +506,7 @@ describe('vendors API', () => {
         'DISPUTE_SOON',
       ]);
 
-      const res = await post(`/api/invoices/${first}/trust-bank-details`, {}).expect(200);
+      const res = await trust(first, 200);
       expect(flagCodes(res.body.flags)).toEqual(['DISPUTE_SOON']);
       expect(flagCodes((await invoiceRow(sameAccount)).flags)).toEqual(['DISPUTE_SOON']);
       const unknown = (await invoiceRow(second)).flags as { code: string; severity: string }[];
@@ -543,13 +551,13 @@ describe('vendors API', () => {
 
     it('trusting the same account again changes nothing and is 200', async () => {
       const { vendorId, first } = await aegWithVendor();
-      await post(`/api/invoices/${first}/trust-bank-details`, {}).expect(200);
+      await trust(first, 200);
       const again = await ingestFixture(t, 'aeg', {
         pdf: pdfVariant('aeg', '2'),
         wire: { invoiceNumber: '3110714' },
       });
-      await post(`/api/invoices/${again}/trust-bank-details`, {}).expect(200);
-      await post(`/api/invoices/${first}/trust-bank-details`, {}).expect(200);
+      await trust(again, 200);
+      await trust(first, 200);
       expect((await get(`/api/vendors/${vendorId}`).expect(200)).body.bankAccounts).toHaveLength(1);
       expect(await t.prisma.invoiceEvent.count({ where: { type: 'bank_account_trusted' } })).toBe(
         1,
@@ -558,7 +566,7 @@ describe('vendors API', () => {
 
     it('works on unpaid invoices; 409 in other statuses, without a vendor or without bank details', async () => {
       const aeg = await ingestFixture(t, 'aeg'); // no vendor yet
-      const res = await post(`/api/invoices/${aeg}/trust-bank-details`, {}).expect(409);
+      const res = await trust(aeg, 409);
       expect(res.body.message).toBe(
         'Link the invoice to a vendor before trusting its bank details',
       );
@@ -566,10 +574,11 @@ describe('vendors API', () => {
       const vendorId = await createVendor({ name: 'AEG Fuels Ireland' });
       for (const status of ['processing', 'paid', 'rejected'] as const) {
         await t.prisma.invoice.update({ where: { id: aeg }, data: { status } });
-        await post(`/api/invoices/${aeg}/trust-bank-details`, {}).expect(409);
+        const blocked = await trust(aeg, 409);
+        expect(blocked.body).toMatchObject({ code: 'INVALID_TRANSITION', status });
       }
       await t.prisma.invoice.update({ where: { id: aeg }, data: { status: 'unpaid' } });
-      await post(`/api/invoices/${aeg}/trust-bank-details`, {}).expect(200);
+      await trust(aeg, 200);
       expect((await get(`/api/vendors/${vendorId}`).expect(200)).body.activeBankAccountCount).toBe(
         1,
       );
@@ -585,17 +594,17 @@ describe('vendors API', () => {
           },
         },
       });
-      const missing = await post(`/api/invoices/${noBank}/trust-bank-details`, {}).expect(409);
+      const missing = await trust(noBank, 409);
       expect(missing.body.message).toBe('The invoice has no IBAN or account number to trust');
-      await post(
-        '/api/invoices/00000000-0000-0000-0000-000000000000/trust-bank-details',
-        {},
-      ).expect(404);
+      await post('/api/invoices/00000000-0000-0000-0000-000000000000/trust-bank-details', {
+        version: 0,
+      }).expect(404);
+      await post(`/api/invoices/${aeg}/trust-bank-details`, {}).expect(400);
     });
 
     it('removal is soft and idempotent; the flag comes back', async () => {
       const { vendorId, first } = await aegWithVendor();
-      await post(`/api/invoices/${first}/trust-bank-details`, {}).expect(200);
+      await trust(first, 200);
       const accountId = (await get(`/api/vendors/${vendorId}`).expect(200)).body.bankAccounts[0]
         .id as string;
 
@@ -619,7 +628,7 @@ describe('vendors API', () => {
       expect(again.body.bankAccounts[0].removedAt).toBe(removedAt);
 
       // Trusting again adds a new active entry; the removed one stays as history.
-      await post(`/api/invoices/${first}/trust-bank-details`, {}).expect(200);
+      await trust(first, 200);
       const vendor = (await get(`/api/vendors/${vendorId}`).expect(200)).body;
       expect(vendor.bankAccounts).toHaveLength(2);
       expect(vendor.activeBankAccountCount).toBe(1);

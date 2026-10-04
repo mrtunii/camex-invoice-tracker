@@ -65,6 +65,9 @@ export function filterConditions(filters: InvoiceFilters, today: string): Prisma
     // jsonb containment: some element of the flags array has severity "error".
     conditions.push(Prisma.sql`i.flags @> '[{"severity": "error"}]'::jsonb`);
   }
+  if (filters.extraction === 'failed') {
+    conditions.push(Prisma.sql`i.extraction_status = 'failed'`);
+  }
   if (filters.due === 'overdue') {
     conditions.push(Prisma.sql`(i.status = 'unpaid' AND i.due_date < ${today}::date)`);
   } else if (filters.due === 'soon') {

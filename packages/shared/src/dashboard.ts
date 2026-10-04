@@ -20,7 +20,7 @@ export type YearMonth = z.infer<typeof yearMonthSchema>;
 /** Rows in each Home panel; categories and vendors in each ranked list. */
 export const DASHBOARD_PANEL_ROWS = 5;
 export const DASHBOARD_TOP_ROWS = 5;
-/** Months in the trend chart, ending with the current month. */
+/** Months in the trend chart, ending with the dashboard's month (T06 0b). */
 export const DASHBOARD_TREND_MONTHS = 12;
 
 export const dashboardQuerySchema = z.strictObject({
@@ -144,7 +144,7 @@ export const dashboardSchema = z.object({
   currencies: z.array(currencyCodeSchema),
   attention: dashboardAttentionSchema,
   ledger: dashboardLedgerSchema,
-  /** DASHBOARD_TREND_MONTHS months, oldest first, ending with the current month. */
+  /** DASHBOARD_TREND_MONTHS months, oldest first, ending with `month`. */
   trend: z.array(trendMonthSchema),
   /** Top DASHBOARD_TOP_ROWS by amount (largest first; ties by category); empty without a currency. */
   categories: z.array(categoryTotalSchema),

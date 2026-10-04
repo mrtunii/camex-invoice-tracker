@@ -13,6 +13,7 @@ import { Reading, StatusWord } from '@/components/status-word';
 import { TableEmpty, TablePanel } from '@/components/table-panel';
 import { ToneText } from '@/components/tone';
 import { TruncatedText } from '@/components/truncated-text';
+import { WrappingIdentifier } from '@/components/wrapping-identifier';
 import {
   type Tone,
   dueCell,
@@ -92,7 +93,7 @@ const COLUMNS: Record<Column['id'], Column> = {
       item.invoiceNumber === null ? (
         dash
       ) : (
-        <TruncatedText text={item.invoiceNumber} className="font-mono" />
+        <WrappingIdentifier text={item.invoiceNumber} className="font-mono" />
       ),
   },
   invoiceDate: {

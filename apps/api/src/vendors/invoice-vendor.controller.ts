@@ -2,7 +2,9 @@ import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
 import {
   type InvoiceDetail,
   type LinkInvoiceVendorRequest,
+  type TrustBankDetailsRequest,
   linkInvoiceVendorRequestSchema,
+  trustBankDetailsRequestSchema,
   uuidSchema,
 } from '@camex/shared';
 import { Auth, type AuthContext } from '../auth/auth-context.js';
@@ -29,7 +31,8 @@ export class InvoiceVendorController {
   trustBankDetails(
     @Auth() auth: AuthContext,
     @Param('id', new ZodValidationPipe(uuidSchema)) id: string,
+    @Body(new ZodValidationPipe(trustBankDetailsRequestSchema)) body: TrustBankDetailsRequest,
   ): Promise<InvoiceDetail> {
-    return this.invoiceVendor.trustBankDetails(id, auth.user.id);
+    return this.invoiceVendor.trustBankDetails(id, body.version, auth.user.id);
   }
 }

@@ -38,6 +38,10 @@ export type InvoiceSortKey = z.infer<typeof invoiceSortKeySchema>;
 export const sortOrderSchema = z.enum(['asc', 'desc']);
 export type SortOrder = z.infer<typeof sortOrderSchema>;
 
+/** `failed`: the extraction failed (the invoice was entered, or still has to be, by hand). */
+export const extractionFilterSchema = z.enum(['failed']);
+export type ExtractionFilter = z.infer<typeof extractionFilterSchema>;
+
 /** `overdue`: unpaid, due before today. `soon`: unpaid, due today … today + DUE_SOON_DAYS. */
 export const dueFilterSchema = z.enum(['overdue', 'soon']);
 export type DueFilter = z.infer<typeof dueFilterSchema>;
@@ -101,6 +105,7 @@ const invoiceFilterShape = {
   invoiceDateTo: validCalendarDateSchema.optional(),
   hasErrors: queryBooleanSchema.optional(),
   due: dueFilterSchema.optional(),
+  extraction: extractionFilterSchema.optional(),
 };
 
 const dateRangeIssue = {

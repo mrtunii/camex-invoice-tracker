@@ -119,16 +119,17 @@ export class DashboardService {
     const today = businessToday(this.clock);
     const currentMonth = today.slice(0, 7);
     const month = query.month ?? currentMonth;
-    const trendFirst = addMonths(currentMonth, -(DASHBOARD_TREND_MONTHS - 1));
+    // The chart's 12 months end at the picked month (T06 0b), like the ledger beside it.
+    const trendFirst = addMonths(month, -(DASHBOARD_TREND_MONTHS - 1));
 
     const [currencies, attention, ledger] = await Promise.all([
-      this.invoicedCurrencies(trendFirst, currentMonth),
+      this.invoicedCurrencies(trendFirst, month),
       this.attention(today),
       this.ledger(month),
     ]);
     const currency = query.currency ?? currencies[0] ?? null;
     const [trend, categories, topVendors] = await Promise.all([
-      this.trend(trendFirst, currentMonth, currency),
+      this.trend(trendFirst, month, currency),
       currency === null ? [] : this.categories(month, currency),
       currency === null ? [] : this.topVendors(month, currency),
     ]);
