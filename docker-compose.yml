@@ -1,7 +1,9 @@
 # Local development services: Postgres 16 + MinIO (S3-compatible), bucket auto-created.
 # Usage: docker compose up -d --wait   (reads ports/credentials from the root .env)
+# Host ports are deliberately off the defaults (55432 / 59000 / 59001) so this stack can run
+# next to other projects on the same machine.
 
-name: camex-invoice-tracker
+name: camex-invoices
 
 services:
   postgres:
@@ -11,7 +13,7 @@ services:
       POSTGRES_PASSWORD: camex
       POSTGRES_DB: camex
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '${POSTGRES_PORT:-55432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -30,8 +32,8 @@ services:
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in .env}
     ports:
-      - '${MINIO_PORT:-9000}:9000'
-      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+      - '${MINIO_PORT:-59000}:9000'
+      - '${MINIO_CONSOLE_PORT:-59001}:9001'
     volumes:
       - minio-data:/data
     # The healthcheck also creates the bucket (idempotent, private by default), so the

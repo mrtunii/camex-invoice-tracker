@@ -12,7 +12,7 @@ import { ENV } from '../config/env.module.js';
 import type { Env } from '../config/env.js';
 import { Auth, type AuthContext } from './auth-context.js';
 import { AuthService } from './auth.service.js';
-import { Public } from './public.decorator.js';
+import { AllowDuringPasswordChange, Public } from './public.decorator.js';
 import { clearSessionCookie, setSessionCookie } from './session-token.js';
 import { SessionsService } from './sessions.service.js';
 
@@ -44,6 +44,7 @@ export class AuthController {
     return { user };
   }
 
+  @AllowDuringPasswordChange()
   @Post('logout')
   @HttpCode(204)
   async logout(@Auth() auth: AuthContext, @Res({ passthrough: true }) res: Response) {
@@ -51,11 +52,13 @@ export class AuthController {
     clearSessionCookie(res, this.secureCookies);
   }
 
+  @AllowDuringPasswordChange()
   @Get('me')
   me(@Auth() auth: AuthContext): AuthResponse {
     return { user: auth.user };
   }
 
+  @AllowDuringPasswordChange()
   @Post('change-password')
   @HttpCode(204)
   async changePassword(

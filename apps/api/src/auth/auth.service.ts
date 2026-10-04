@@ -62,10 +62,14 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     this.logger.log({ userId: user.id }, 'login succeeded');
 
-    return { user: { id: user.id, email: user.email, name: user.name }, token, expiresAt };
+    const { id, email, name, mustChangePassword } = user;
+    return { user: { id, email, name, mustChangePassword }, token, expiresAt };
   }
 
-  /** Changes the password and signs out every other session of this user. */
+  /**
+   * Changes the password and signs out every other session of this user. Also clears
+   * must_change_password: the user has now chosen their own password.
+   */
   async changePassword(userId: string, sessionId: string, input: ChangePasswordRequest) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
@@ -75,7 +79,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await hashPassword(input.newPassword) },
+      data: { passwordHash: await hashPassword(input.newPassword), mustChangePassword: false },
     });
     await this.sessions.revokeAllForUser(userId, { except: sessionId });
     this.logger.log({ userId }, 'password changed');

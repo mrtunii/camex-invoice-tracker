@@ -1,3 +1,7 @@
+import { createHmac, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { type DynamicModule, Module, type Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -8,11 +12,17 @@ import { hashPassword } from '../src/auth/password.js';
 import { SESSION_COOKIE } from '../src/auth/session-token.js';
 import { type Env, loadRootEnvFile, parseEnv } from '../src/config/env.js';
 import type { User } from '../src/generated/prisma/client.js';
+import { JobsService } from '../src/jobs/jobs.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
 export const TEST_PASSWORD = 'correct-horse-battery-staple';
 
-/** Env for tests: the root .env, pointed at TEST_DATABASE_URL, silent logs. */
+export const TEST_SIGNING_KEY = 'test-mailgun-signing-key';
+
+/**
+ * Env for tests: the root .env, pointed at TEST_DATABASE_URL and TEST_S3_BUCKET, silent logs,
+ * no bootstrap admin, and job workers off (tests that need them turn them on).
+ */
 export function testEnv(overrides: NodeJS.ProcessEnv = {}): Env {
   loadRootEnvFile();
   return parseEnv({
@@ -20,6 +30,13 @@ export function testEnv(overrides: NodeJS.ProcessEnv = {}): Env {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     DATABASE_URL: process.env.TEST_DATABASE_URL,
+    S3_BUCKET: process.env.TEST_S3_BUCKET,
+    BOOTSTRAP_ADMIN_EMAIL: '',
+    BOOTSTRAP_ADMIN_PASSWORD: '',
+    MAILGUN_WEBHOOK_SIGNING_KEY: TEST_SIGNING_KEY,
+    EXTRACTOR_PROVIDER: 'stub',
+    EXTRACTION_RETRY_DELAY_SECONDS: '1',
+    WORKERS_ENABLED: 'false',
     ...overrides,
   });
 }
@@ -67,9 +84,20 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
   );
 }
 
+/** Removes every pg-boss job so one test's jobs can't leak into the next. */
+export async function resetJobs(t: TestApp): Promise<void> {
+  await (await t.app.get(JobsService).ready()).deleteAllJobs();
+}
+
 export async function createUser(
   prisma: PrismaService,
-  data: { email: string; name?: string; password?: string; isActive?: boolean },
+  data: {
+    email: string;
+    name?: string;
+    password?: string;
+    isActive?: boolean;
+    mustChangePassword?: boolean;
+  },
 ): Promise<User> {
   return prisma.user.create({
     data: {
@@ -77,6 +105,7 @@ export async function createUser(
       name: data.name ?? data.email.split('@')[0] ?? 'User',
       passwordHash: await hashPassword(data.password ?? TEST_PASSWORD),
       isActive: data.isActive ?? true,
+      mustChangePassword: data.mustChangePassword ?? false,
     },
   });
 }
@@ -105,4 +134,86 @@ export async function login(
   if (ip) req = req.set('X-Forwarded-For', ip);
   const res = await req.expect(200);
   return sessionCookieFrom(res);
+}
+
+/** Polls until `check` returns a value other than undefined/false, or fails after `timeoutMs`. */
+export async function waitFor<T>(
+  check: () => Promise<T | undefined | false>,
+  { timeoutMs = 20_000, intervalMs = 200 } = {},
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await check();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error(`waitFor: condition not met within ${timeoutMs} ms`);
+    await sleep(intervalMs);
+  }
+}
+
+// ─── Fixtures and Mailgun ─────────────────────────────────────────────────────
+
+const FIXTURES = resolve(import.meta.dirname, '../../../fixtures/invoices');
+
+export function fixture(name: 'asm.pdf' | 'petrocas.pdf' | 'aeg.pdf'): Buffer {
+  return readFileSync(resolve(FIXTURES, name));
+}
+
+export function mailgunSignature(key = TEST_SIGNING_KEY) {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const token = randomBytes(25).toString('hex');
+  return {
+    timestamp,
+    token,
+    signature: createHmac('sha256', key)
+      .update(timestamp + token)
+      .digest('hex'),
+  };
+}
+
+export interface MailgunAttachment {
+  filename: string;
+  contentType: string;
+  data: Buffer;
+}
+
+/**
+ * POSTs a Mailgun route-forward payload like Mailgun does: multipart with attachments,
+ * urlencoded without. `fields` are added after (and override) the defaults.
+ */
+export function postMailgun(
+  t: TestApp,
+  options: {
+    fields?: Record<string, string | undefined>;
+    attachments?: MailgunAttachment[];
+    signature?: Partial<Record<'timestamp' | 'token' | 'signature', string | undefined>>;
+  } = {},
+) {
+  const fields: Record<string, string | undefined> = {
+    recipient: 'invoices@in.camex.aero',
+    sender: 'billing@vendor.example',
+    from: 'Vendor Billing <Billing@Vendor.example>',
+    subject: 'Invoice 42',
+    'body-plain': 'Please find our invoice attached.',
+    'Message-Id': `<${randomBytes(8).toString('hex')}@vendor.example>`,
+    ...mailgunSignature(),
+    ...options.signature,
+    ...options.fields,
+  };
+  const defined = Object.entries(fields).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
+  const attachments = options.attachments ?? [];
+  const req = t.http().post('/api/inbound/mailgun');
+  if (attachments.length === 0) {
+    return req.type('form').send(new URLSearchParams(defined).toString());
+  }
+  for (const [key, value] of defined) void req.field(key, value);
+  void req.field('attachment-count', String(attachments.length));
+  attachments.forEach((file, i) => {
+    void req.attach(`attachment-${i + 1}`, file.data, {
+      filename: file.filename,
+      contentType: file.contentType,
+    });
+  });
+  return req;
 }

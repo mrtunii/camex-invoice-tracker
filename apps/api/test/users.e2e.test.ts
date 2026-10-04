@@ -25,6 +25,7 @@ describe('users', () => {
       email: 'admin@camex.aero',
       name: 'Admin',
       isActive: true,
+      mustChangePassword: false,
       lastLoginAt: expect.any(String),
       createdAt: expect.any(String),
     });

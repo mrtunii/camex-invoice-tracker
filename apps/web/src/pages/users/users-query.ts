@@ -1,4 +1,9 @@
-import { type UpdateUserRequest, userListResponseSchema, userSchema } from '@camex/shared';
+import {
+  type ResetPasswordRequest,
+  type UpdateUserRequest,
+  userListResponseSchema,
+  userSchema,
+} from '@camex/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
@@ -16,6 +21,15 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, ...body }: UpdateUserRequest & { id: string }) =>
       api(`/users/${id}`, userSchema, { method: 'PATCH', body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: usersQueryKey }),
+  });
+}
+
+export function useResetPassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: ResetPasswordRequest & { id: string }) =>
+      api(`/users/${id}/reset-password`, userSchema, { method: 'POST', body }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: usersQueryKey }),
   });
 }

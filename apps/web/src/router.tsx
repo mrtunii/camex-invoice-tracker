@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/app-layout';
 import { RequireAuth } from '@/components/require-auth';
+import { InboxPage } from '@/pages/inbox/inbox-page';
 import { LoginPage } from '@/pages/login-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { PlaceholderPage } from '@/pages/placeholder-page';
@@ -23,15 +24,7 @@ export const router = createBrowserRouter([
               </PlaceholderPage>
             ),
           },
-          {
-            path: 'inbox',
-            element: (
-              <PlaceholderPage title="Inbox">
-                Every email received at invoices@camex.aero will be logged here, including ones
-                without a PDF.
-              </PlaceholderPage>
-            ),
-          },
+          { path: 'inbox', element: <InboxPage /> },
           {
             path: 'vendors',
             element: (

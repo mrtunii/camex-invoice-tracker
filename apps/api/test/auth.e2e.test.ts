@@ -41,7 +41,9 @@ describe('auth', () => {
         .send({ email: 'Admin@Camex.Aero', password: TEST_PASSWORD })
         .expect(200);
 
-      expect(res.body).toEqual({ user: { id: user.id, email: 'admin@camex.aero', name: 'Admin' } });
+      expect(res.body).toEqual({
+        user: { id: user.id, email: 'admin@camex.aero', name: 'Admin', mustChangePassword: false },
+      });
 
       const cookie = setCookies(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
       expect(cookie).toBeDefined();
@@ -68,7 +70,14 @@ describe('auth', () => {
         .http()
         .get('/api/auth/me')
         .set('Cookie', sessionCookieFrom(res))
-        .expect(200, { user: { id: user.id, email: 'admin@camex.aero', name: 'Admin' } });
+        .expect(200, {
+          user: {
+            id: user.id,
+            email: 'admin@camex.aero',
+            name: 'Admin',
+            mustChangePassword: false,
+          },
+        });
     });
 
     it('returns the same generic 401 for wrong password, unknown email and inactive user', async () => {

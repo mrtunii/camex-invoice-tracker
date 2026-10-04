@@ -44,6 +44,11 @@ describe('global session guard', () => {
     ['get', '/api/users'],
     ['post', '/api/users'],
     ['patch', '/api/users/00000000-0000-0000-0000-000000000000'],
+    ['post', '/api/users/00000000-0000-0000-0000-000000000000/reset-password'],
+    ['get', '/api/inbox'],
+    ['get', '/api/inbox/00000000-0000-0000-0000-000000000000'],
+    ['post', '/api/invoices/upload'],
+    ['get', '/api/invoices/00000000-0000-0000-0000-000000000000/file'],
     ['get', '/api/probe/private'],
   ] as const)('blocks unauthenticated %s %s with 401', async (method, path) => {
     const res = await t.http()[method](path).send({}).expect(401);

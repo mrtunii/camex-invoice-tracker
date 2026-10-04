@@ -43,7 +43,11 @@ export class SessionsService {
   async validate(token: string, now = new Date()): Promise<ValidatedSession | null> {
     const session = await this.prisma.session.findUnique({
       where: { tokenHash: hashSessionToken(token) },
-      include: { user: { select: { id: true, email: true, name: true, isActive: true } } },
+      include: {
+        user: {
+          select: { id: true, email: true, name: true, isActive: true, mustChangePassword: true },
+        },
+      },
     });
     if (!session) return null;
 
@@ -61,8 +65,8 @@ export class SessionsService {
       });
     }
 
-    const { id, email, name } = session.user;
-    return { sessionId: session.id, user: { id, email, name }, extendedUntil };
+    const { id, email, name, mustChangePassword } = session.user;
+    return { sessionId: session.id, user: { id, email, name, mustChangePassword }, extendedUntil };
   }
 
   async revoke(sessionId: string): Promise<void> {

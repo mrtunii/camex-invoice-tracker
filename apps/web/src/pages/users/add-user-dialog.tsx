@@ -98,7 +98,7 @@ export function AddUserDialog() {
                 {...form.register('password')}
               />
               <FieldDescription>
-                Share it with them directly. They can change it after signing in.
+                Share it with them directly. They must choose their own at first sign-in.
               </FieldDescription>
               <FieldError errors={[errors.password]} />
             </Field>

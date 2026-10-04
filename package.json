@@ -17,7 +17,8 @@
     "test": "pnpm -r test",
     "db:migrate": "pnpm --filter @camex/api db:migrate",
     "db:migrate:dev": "pnpm --filter @camex/api db:migrate:dev",
-    "create-admin": "pnpm --filter @camex/api create-admin"
+    "create-admin": "pnpm --filter @camex/api create-admin",
+    "simulate:mailgun": "pnpm --filter @camex/api simulate:mailgun"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import {
   type CreateUserRequest,
+  type ResetPasswordRequest,
   type UpdateUserRequest,
   type User,
   type UserListResponse,
   createUserRequestSchema,
+  resetPasswordRequestSchema,
   updateUserRequestSchema,
   userIdParamSchema,
 } from '@camex/shared';
@@ -36,5 +38,15 @@ export class UsersController {
     @Body(new ZodValidationPipe(updateUserRequestSchema)) body: UpdateUserRequest,
   ): Promise<User> {
     return this.users.update(id, body, auth.user.id);
+  }
+
+  @Post(':id/reset-password')
+  @HttpCode(200)
+  resetPassword(
+    @Auth() auth: AuthContext,
+    @Param('id', new ZodValidationPipe(userIdParamSchema)) id: string,
+    @Body(new ZodValidationPipe(resetPasswordRequestSchema)) body: ResetPasswordRequest,
+  ): Promise<User> {
+    return this.users.resetPassword(id, body, auth.user.id);
   }
 }

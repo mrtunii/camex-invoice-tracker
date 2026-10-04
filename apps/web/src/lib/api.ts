@@ -1,3 +1,4 @@
+import { PASSWORD_CHANGE_REQUIRED } from '@camex/shared';
 import type { z } from 'zod';
 
 export class ApiError extends Error {
@@ -14,6 +15,7 @@ export class ApiError extends Error {
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** JSON-serialized, except FormData, which is sent as multipart/form-data. */
   body?: unknown;
 }
 
@@ -28,11 +30,12 @@ function messageFrom(body: unknown): string | undefined {
 async function send(path: string, { method = 'GET', body }: RequestOptions): Promise<unknown> {
   let res: Response;
   try {
+    const isForm = body instanceof FormData;
     res = await fetch(`/api${path}`, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined || isForm ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, "Can't reach the server. Check your connection and try again.", null);
@@ -61,4 +64,16 @@ export async function apiNoContent(path: string, options: RequestOptions): Promi
 
 export function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
+}
+
+/** 403 from any route while the signed-in user must set a new password. */
+export function isPasswordChangeRequired(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 403) return false;
+  const { body } = error;
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'code' in body &&
+    body.code === PASSWORD_CHANGE_REQUIRED
+  );
 }

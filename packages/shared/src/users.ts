@@ -9,6 +9,7 @@ export const userSchema = z.object({
   email: z.string(),
   name: z.string(),
   isActive: z.boolean(),
+  mustChangePassword: z.boolean(),
   lastLoginAt: isoTimestampSchema.nullable(),
   createdAt: isoTimestampSchema,
 });
@@ -36,3 +37,7 @@ export const updateUserRequestSchema = z
 export type UpdateUserRequest = z.infer<typeof updateUserRequestSchema>;
 
 export const userIdParamSchema = uuidSchema;
+
+/** An admin sets a temporary password for another user; they must change it at next sign-in. */
+export const resetPasswordRequestSchema = z.object({ newPassword: newPasswordSchema });
+export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;

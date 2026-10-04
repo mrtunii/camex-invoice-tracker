@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { PageHeader } from '@/components/page-header';
 
-/** Stand-in for screens built in later tasks (Invoices T05/T06, Inbox T02, Vendors T04). */
+/** Stand-in for screens built in later tasks (Invoices T05/T06, Vendors T04). */
 export function PlaceholderPage({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-6">

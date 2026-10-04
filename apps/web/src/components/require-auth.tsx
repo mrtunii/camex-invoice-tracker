@@ -2,8 +2,12 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { useMe } from '@/lib/auth';
 import { CurrentUserContext } from '@/lib/current-user';
+import { SetPasswordPage } from '@/pages/set-password-page';
 
-/** Route gate: renders children only with a valid session, otherwise redirects to /login. */
+/**
+ * Route gate: renders children only with a valid session, otherwise redirects to /login.
+ * A user who must change their password sees only the "Set a new password" screen.
+ */
 export function RequireAuth() {
   const me = useMe();
   const location = useLocation();
@@ -29,7 +33,7 @@ export function RequireAuth() {
 
   return (
     <CurrentUserContext.Provider value={me.data}>
-      <Outlet />
+      {me.data.mustChangePassword ? <SetPasswordPage /> : <Outlet />}
     </CurrentUserContext.Provider>
   );
 }

@@ -1,5 +1,7 @@
 /**
- * Creates an admin user. The only way to create the first user (there is no signup endpoint).
+ * Creates an admin user from the command line, for local development. Deployed environments
+ * create the first admin from BOOTSTRAP_ADMIN_* on boot (see BootstrapAdminService).
+ * The password is chosen by the person running this, so no forced change at first login.
  *
  *   pnpm create-admin --email ops@camex.aero --name "Ops Admin"            # prompts for the password
  *   pnpm create-admin --email ops@camex.aero --name "Ops Admin" --password '…'   # for scripts
@@ -9,7 +11,7 @@ import { emailSchema, newPasswordSchema, userNameSchema } from '@camex/shared';
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { z } from 'zod';
 import { hashPassword } from '../auth/password.js';
-import { envSchema, loadRootEnvFile } from '../config/env.js';
+import { envObjectSchema, loadRootEnvFile } from '../config/env.js';
 import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 
 const USAGE =
@@ -109,7 +111,7 @@ async function main(argv: string[]): Promise<void> {
 
   loadRootEnvFile();
   const { DATABASE_URL } = check(
-    envSchema.pick({ DATABASE_URL: true }),
+    envObjectSchema.pick({ DATABASE_URL: true }),
     process.env,
     'Environment',
   );

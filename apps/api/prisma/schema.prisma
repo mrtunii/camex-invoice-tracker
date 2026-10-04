@@ -93,15 +93,18 @@ enum InvoiceEventType {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// Always lowercase (also enforced by a CHECK constraint in the migration).
-  email        String    @unique
-  name         String
-  passwordHash String    @map("password_hash")
-  isActive     Boolean   @default(true) @map("is_active")
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdById  String?   @map("created_by_id") @db.Uuid
+  email              String    @unique
+  name               String
+  passwordHash       String    @map("password_hash")
+  isActive           Boolean   @default(true) @map("is_active")
+  /// Set when someone else chose the password (bootstrap, created by an admin, admin reset).
+  /// While true the API only allows /auth/me, /auth/change-password and /auth/logout.
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  lastLoginAt        DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdById        String?   @map("created_by_id") @db.Uuid
 
   createdBy      User?          @relation("UserCreatedBy", fields: [createdById], references: [id])
   createdUsers   User[]         @relation("UserCreatedBy")

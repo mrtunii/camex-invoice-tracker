@@ -88,7 +88,7 @@ Manual upload ──▶ /api/invoices/upload ──┼─▶ store email + PDFs 
 
 ## 5. Data model
 
-Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` · money `numeric(18,4)` · unit prices `numeric(18,6)` · quantities `numeric(18,4)` · currency `char(3)` ISO 4217. In JSON, decimals are strings and dates are `YYYY-MM-DD`. Never use JS `number` for money.
+Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` · money `numeric(18,4)` · unit prices `numeric(18,6)` · quantities `numeric(18,4)` · currency `char(3)` ISO 4217. In JSON, decimals are strings and dates are `YYYY-MM-DD`. Never use JS `number` for money. API JSON uses camelCase; DB columns stay snake_case (Prisma @map).
 
 **users** — id, email (unique, lowercase), name, password_hash, is_active, last_login_at, created_at, created_by_id
 
@@ -211,7 +211,7 @@ Bank matching compares normalized IBAN / account number (spaces removed, upperca
 
 ## 11. Auth and users
 
-- Email + password (argon2id). No signup endpoint. First admin via CLI `pnpm create-admin`. Admins create other admins with an initial password shared out-of-band; users can change their password.
+- Email + password (argon2id). No signup endpoint. The first admin is created from BOOTSTRAP_ADMIN_* env vars on boot, only when no users exist (CLI kept for local dev). A password set by someone else must be changed on first login. Admins can reset another user's password to a temporary one. Admins create other admins with an initial password shared out-of-band; users can change their password.
 - DB-backed sessions: opaque 32-byte random token in an httpOnly cookie (Secure in prod, SameSite=Lax); only its SHA-256 is stored. 14-day expiry, extended on use.
 - Login rate-limited per IP and per email; generic error messages.
 - Users are deactivated, never deleted. Deactivation revokes sessions. You can't deactivate yourself.
@@ -240,4 +240,5 @@ Bank matching compares normalized IBAN / account number (spaces removed, upperca
 
 - Each task is a prompt from the CTO. Claude Code reads this spec and `CLAUDE.md`, implements only that task, and writes `docs/reports/Txx-<slug>.md`.
 - If implementation exposes a spec problem, record it under "Questions for the CTO". Don't silently redesign.
+- Each task runs on branch tNN-<slug> and ends with one commit; the CTO reviews before merge. Reports include `git diff --stat main...HEAD`.
 - Report sections: Summary · What was built · Deviations (with reasons) · Unspecified decisions made · How to verify (exact commands from a clean clone, expected result) · Test results (command + output summary) · Known issues / shortcuts · Questions for the CTO.

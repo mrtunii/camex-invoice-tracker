@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table';
 import { formatTimestamp } from '@/lib/format';
 import { AddUserDialog } from './add-user-dialog';
+import { ResetPasswordDialog } from './reset-password-dialog';
 import { useUpdateUser, useUsers } from './users-query';
 
 function DeactivateDialog({ user, onClose }: { user: User | null; onClose: () => void }) {
@@ -64,7 +65,15 @@ function DeactivateDialog({ user, onClose }: { user: User | null; onClose: () =>
   );
 }
 
-function UserRow({ user, onDeactivate }: { user: User; onDeactivate: (user: User) => void }) {
+function UserRow({
+  user,
+  onDeactivate,
+  onResetPassword,
+}: {
+  user: User;
+  onDeactivate: (user: User) => void;
+  onResetPassword: (user: User) => void;
+}) {
   const currentUser = useCurrentUser();
   const updateUser = useUpdateUser();
   const isSelf = user.id === currentUser.id;
@@ -87,22 +96,37 @@ function UserRow({ user, onDeactivate }: { user: User; onDeactivate: (user: User
       </TableCell>
       <TableCell className="font-mono text-[0.8125rem]">{user.email}</TableCell>
       <TableCell>
-        {user.isActive ? (
-          <Badge variant="secondary">Active</Badge>
-        ) : (
-          <Badge variant="outline">Deactivated</Badge>
-        )}
+        <div className="flex flex-wrap gap-1.5">
+          {user.isActive ? (
+            <Badge variant="secondary">Active</Badge>
+          ) : (
+            <Badge variant="outline">Deactivated</Badge>
+          )}
+          {user.mustChangePassword && <Badge variant="outline">Temporary password</Badge>}
+        </div>
       </TableCell>
       <TableCell>{formatTimestamp(user.lastLoginAt)}</TableCell>
       <TableCell className="text-right">
-        {isSelf ? null : user.isActive ? (
-          <Button variant="ghost" size="sm" onClick={() => onDeactivate(user)}>
-            Deactivate
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" onClick={reactivate} disabled={updateUser.isPending}>
-            Reactivate
-          </Button>
+        {isSelf ? null : (
+          <div className="flex justify-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => onResetPassword(user)}>
+              Reset password
+            </Button>
+            {user.isActive ? (
+              <Button variant="ghost" size="sm" onClick={() => onDeactivate(user)}>
+                Deactivate
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={reactivate}
+                disabled={updateUser.isPending}
+              >
+                Reactivate
+              </Button>
+            )}
+          </div>
         )}
       </TableCell>
     </TableRow>
@@ -112,6 +136,7 @@ function UserRow({ user, onDeactivate }: { user: User; onDeactivate: (user: User
 export function UsersPage() {
   const users = useUsers();
   const [deactivating, setDeactivating] = useState<User | null>(null);
+  const [resetting, setResetting] = useState<User | null>(null);
 
   return (
     <div className="space-y-6">
@@ -146,7 +171,12 @@ export function UsersPage() {
                 </TableRow>
               ) : (
                 users.data.map((user) => (
-                  <UserRow key={user.id} user={user} onDeactivate={setDeactivating} />
+                  <UserRow
+                    key={user.id}
+                    user={user}
+                    onDeactivate={setDeactivating}
+                    onResetPassword={setResetting}
+                  />
                 ))
               )}
             </TableBody>
@@ -155,6 +185,7 @@ export function UsersPage() {
       )}
 
       <DeactivateDialog user={deactivating} onClose={() => setDeactivating(null)} />
+      <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
     </div>
   );
 }
