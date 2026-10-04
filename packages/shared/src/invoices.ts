@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { uuidSchema } from './common.js';
+import { isoTimestampSchema, uuidSchema } from './common.js';
+import {
+  bankDetailsSchema,
+  calendarDateSchema,
+  currencyCodeSchema,
+  decimalStringSchema,
+  documentTypeSchema,
+  extractedLineItemSchema,
+  invoiceCategorySchema,
+} from './extraction.js';
 
 /** SPEC §6. `processing` until extraction finishes (successfully or not). */
 export const invoiceStatusSchema = z.enum([
@@ -31,3 +40,67 @@ export const uploadRejectedSchema = z.object({
   rejectedFiles: z.array(z.string()),
 });
 export type UploadRejected = z.infer<typeof uploadRejectedSchema>;
+
+/** SPEC §5 flags (computed from T04 on; always [] before that). */
+export const invoiceFlagSchema = z.object({
+  code: z.string(),
+  severity: z.enum(['error', 'warning', 'info']),
+  field: z.string().nullable(),
+  message: z.string(),
+});
+export type InvoiceFlag = z.infer<typeof invoiceFlagSchema>;
+
+/**
+ * GET /api/invoices/:id. Decimals are strings, calendar dates 'YYYY-MM-DD'. The raw model
+ * output is not exposed. (T06 adds workflow fields, the source email and the activity log.)
+ */
+export const invoiceDetailSchema = z.object({
+  id: uuidSchema,
+  inboundEmailId: uuidSchema,
+  fileName: z.string(),
+  fileSize: z.number().int().nonnegative(),
+  fileSha256: z.string(),
+  pageCount: z.number().int().nullable(),
+  status: invoiceStatusSchema,
+
+  extractionStatus: extractionStatusSchema,
+  extractionError: z.string().nullable(),
+  extractionModel: z.string().nullable(),
+  extractionPromptVersion: z.string().nullable(),
+  extractedAt: isoTimestampSchema.nullable(),
+
+  documentType: documentTypeSchema.nullable(),
+  vendorId: uuidSchema.nullable(),
+  vendorName: z.string().nullable(),
+  vendorTaxId: z.string().nullable(),
+  billToName: z.string().nullable(),
+  invoiceNumber: z.string().nullable(),
+  invoiceDate: calendarDateSchema.nullable(),
+  serviceDate: calendarDateSchema.nullable(),
+  dueDate: calendarDateSchema.nullable(),
+  disputeDeadline: calendarDateSchema.nullable(),
+  paymentTermsText: z.string().nullable(),
+  paymentTermsDays: z.number().int().nullable(),
+  disputeWindowDays: z.number().int().nullable(),
+  category: invoiceCategorySchema.nullable(),
+  description: z.string().nullable(),
+  airportIcao: z.string().nullable(),
+  airportIata: z.string().nullable(),
+  locationText: z.string().nullable(),
+  aircraftRegistration: z.string().nullable(),
+  flightNumbers: z.array(z.string()),
+  currency: currencyCodeSchema.nullable(),
+  subtotalAmount: decimalStringSchema.nullable(),
+  taxAmount: decimalStringSchema.nullable(),
+  totalAmount: decimalStringSchema.nullable(),
+  amountDue: decimalStringSchema.nullable(),
+  amountDueCurrency: currencyCodeSchema.nullable(),
+  lineItems: z.array(extractedLineItemSchema),
+  bankDetails: bankDetailsSchema.nullable(),
+  notes: z.string().nullable(),
+  flags: z.array(invoiceFlagSchema),
+
+  createdAt: isoTimestampSchema,
+  updatedAt: isoTimestampSchema,
+});
+export type InvoiceDetail = z.infer<typeof invoiceDetailSchema>;

@@ -5,6 +5,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { type DynamicModule, Module, type Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import {
+  type ExtractedInvoice,
+  type ExtractionOutputV1,
+  extractedInvoiceSchema,
+} from '@camex/shared';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
@@ -216,4 +221,71 @@ export function postMailgun(
     });
   });
   return req;
+}
+
+// ─── Extraction fixtures ──────────────────────────────────────────────────────
+
+export function expectedExtraction(name: 'asm' | 'petrocas' | 'aeg'): ExtractedInvoice {
+  return extractedInvoiceSchema.parse(
+    JSON.parse(readFileSync(resolve(FIXTURES, 'expected', `${name}.json`), 'utf8')),
+  );
+}
+
+/** A wire (model) output equivalent to a golden file: "" for null, strings for numbers. */
+export function wireFromExpected(expected: ExtractedInvoice): ExtractionOutputV1 {
+  const s = (value: string | number | null) => (value === null ? '' : String(value));
+  const bank = expected.bankDetails;
+  return {
+    documentType: expected.documentType,
+    vendorName: s(expected.vendorName),
+    vendorTaxId: s(expected.vendorTaxId),
+    billToName: s(expected.billToName),
+    invoiceNumber: s(expected.invoiceNumber),
+    invoiceDate: s(expected.invoiceDate),
+    serviceDate: s(expected.serviceDate),
+    dueDate: s(expected.dueDate),
+    paymentTermsText: s(expected.paymentTermsText),
+    paymentTermsDays: s(expected.paymentTermsDays),
+    disputeWindowDays: s(expected.disputeWindowDays),
+    category: expected.category,
+    description: s(expected.description),
+    airportIcao: s(expected.airportIcao),
+    airportIata: s(expected.airportIata),
+    locationText: s(expected.locationText),
+    aircraftRegistration: s(expected.aircraftRegistration),
+    flightNumbers: [...expected.flightNumbers],
+    currency: s(expected.currency),
+    subtotalAmount: s(expected.subtotalAmount),
+    taxAmount: s(expected.taxAmount),
+    totalAmount: s(expected.totalAmount),
+    amountDue: s(expected.amountDue),
+    amountDueCurrency: s(expected.amountDueCurrency),
+    lineItems: expected.lineItems.map((line) => ({
+      kind: line.kind,
+      description: s(line.description),
+      quantity: s(line.quantity),
+      uom: s(line.uom),
+      unitPrice: s(line.unitPrice),
+      amount: s(line.amount),
+    })),
+    bankDetails: {
+      beneficiary: s(bank?.beneficiary ?? null),
+      bankName: s(bank?.bankName ?? null),
+      iban: s(bank?.iban ?? null),
+      accountNumber: s(bank?.accountNumber ?? null),
+      swift: s(bank?.swift ?? null),
+      routingNumber: s(bank?.routingNumber ?? null),
+      currency: s(bank?.currency ?? null),
+    },
+    notes: s(expected.notes),
+  };
+}
+
+/** What a model would plausibly return for asm.pdf: printed shorthand, no hyphen. */
+export function asmWireOutput(): ExtractionOutputV1 {
+  return {
+    ...wireFromExpected(expectedExtraction('asm')),
+    flightNumbers: ['CMS503/4'],
+    aircraftRegistration: '4LCME',
+  };
 }

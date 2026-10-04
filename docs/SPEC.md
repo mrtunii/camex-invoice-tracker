@@ -27,7 +27,7 @@ Notifications/reminders · FX conversion or cross-currency totals · partial pay
 
 Three real samples live in `fixtures/invoices/` (do not modify them).
 
-| | ASM (Dubai) | Petrocas (Tbilisi) | AEG Fuels (Bucharest) |
+| | ASM (Dubai) — fuel at BUD | Petrocas (Tbilisi) — fuel at TBS | AEG Fuels (Ireland/UK) — fuel at OTP |
 |---|---|---|---|
 | Invoice no. | SI-000218719 | PFSG-CAM-00000000510 | 3110713 |
 | Date format | 16-Sep-2026 | 02.10.2026 (DD.MM) | 09/14/2026 (MM/DD) |
@@ -80,6 +80,7 @@ Manual upload ──▶ /api/invoices/upload ──┼─▶ store email + PDFs 
 - **Idempotency:** unique on `Message-Id`; a repeated delivery returns 200 and does nothing.
 - **Respond fast:** persist email + files, create rows, enqueue jobs, return 200. No LLM calls inside the request.
 - Body limit ≥ 30 MB.
+- Any webhook limit violation (INBOUND_MAX_REQUEST_MB, file size or count) → 406 so Mailgun doesn't retry; logged at error level.
 - Attachments: process `application/pdf` (also `.pdf` extension when MIME is generic). Each PDF → one invoice row. Other attachments: record filename/type/size on the email, don't store content. Emails with zero PDFs are still stored and visible in the Inbox log.
 - Exact file duplicates still create a row; validation flags them.
 
@@ -155,6 +156,11 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 - Pipeline: call → zod-parse (one re-ask on invalid output) → store raw → map → normalize → derive dates → vendor match → flags → `needs_review`.
 - Failures (API error, timeout, invalid output after re-ask): job retries transient errors (3 attempts, backoff); then `extraction_status = failed`, error stored, status `needs_review` so a human can enter data manually.
 - The extractor has no tools; its output is data only. A malicious PDF can at most produce wrong data, which review and flags exist to catch.
+- Provider: Anthropic (`EXTRACTOR_PROVIDER=anthropic`), `EXTRACTION_MODEL` defaulting to `claude-sonnet-5-5`.
+- Wire format: every field is required, an absent value is `""` (strings) or `[]` (arrays), and there are no unions (no nullable types, no `anyOf`). Anthropic structured outputs allow at most 16 union-typed and 24 optional properties per request ("Schema is too complex for compilation" beyond that), and the schema has about 27 nullable fields. Normalization in code turns `""` into null.
+- Non-retryable (failed immediately, no further attempts): a refusal, output cut off at `max_tokens`, and output still invalid after the re-ask.
+- The recovery sweep re-enqueues invoices stuck in `processing` for 10–60 minutes; past 60 minutes it gives up (`extraction_failed`, "Extraction did not finish within 60 minutes", `needs_review`).
+- Flight-number shorthand (`CMS503/4` → `CMS503`, `CMS504`) and registration normalization (`4LCMX` → `4L-CMX`) happen in code, not in the prompt.
 - **Eval:** `pnpm eval:extraction` runs every fixture and diffs against `fixtures/invoices/expected/*.json`, per field. Run on every prompt or model change. Golden files are provided by the CTO in T03.
 
 ## 8. Validation flags (code, not LLM)

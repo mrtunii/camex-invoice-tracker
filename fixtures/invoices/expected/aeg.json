@@ -1,0 +1,43 @@
+{
+  "documentType": "invoice",
+  "vendorName": "AEG Fuels Ireland Limited",
+  "vendorTaxId": "RO48245463",
+  "billToName": "Camex Airlines LLC",
+  "invoiceNumber": "3110713",
+  "invoiceDate": "2026-09-14",
+  "serviceDate": "2026-09-11",
+  "dueDate": "2026-09-21",
+  "paymentTermsText": "NET7",
+  "paymentTermsDays": 7,
+  "disputeWindowDays": 10,
+  "category": "fuel",
+  "description": "Jet fuel uplift, OTP, 4LCMX, CMS624",
+  "airportIcao": "LROP",
+  "airportIata": "OTP",
+  "locationText": "LROP - Bucharest, RO",
+  "aircraftRegistration": "4L-CMX",
+  "flightNumbers": ["CMS624"],
+  "currency": "USD",
+  "subtotalAmount": "6461.29",
+  "taxAmount": "0",
+  "totalAmount": "6461.29",
+  "amountDue": "6461.29",
+  "amountDueCurrency": "USD",
+  "lineItems": [
+    { "kind": "item", "description": "JET FUEL - LROP", "quantity": "1334.590", "uom": "USG", "unitPrice": "4.629053", "amount": "6177.89" },
+    { "kind": "fee", "description": "Hook Up Fee", "quantity": "1.000", "uom": "QTY", "unitPrice": "10.000000", "amount": "10.00" },
+    { "kind": "fee", "description": "AIRPORT FEE - LROP", "quantity": "1334.590", "uom": "USG", "unitPrice": "0.014010", "amount": "18.70" },
+    { "kind": "fee", "description": "CIVIL AVIATION DEPT FEE - LROP", "quantity": "1334.590", "uom": "USG", "unitPrice": "0.001576", "amount": "2.10" },
+    { "kind": "fee", "description": "SAF FEE - LROP", "quantity": "1334.590", "uom": "USG", "unitPrice": "0.189271", "amount": "252.60" }
+  ],
+  "bankDetails": {
+    "beneficiary": "Associated Energy Group LLC",
+    "bankName": "Wells Fargo Bank, N.A.",
+    "iban": null,
+    "accountNumber": "4942312687",
+    "swift": "WFBIUS6S",
+    "routingNumber": "121000248",
+    "currency": "USD"
+  },
+  "notes": "Claims within 10 days of receipt to csr@aegfuels.com, otherwise deemed accepted. Never accept bank-detail changes by email without verbal confirmation from the AEG representative. Zero-rated VAT (Council Directive 2006/112 Art. 148(e))."
+}

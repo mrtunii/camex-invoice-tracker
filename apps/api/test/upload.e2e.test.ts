@@ -123,4 +123,20 @@ describe('POST /api/invoices/upload', () => {
     await req.expect(400);
     expect(await t.prisma.inboundEmail.count()).toBe(0);
   });
+
+  it('keeps 413 for a file over INBOUND_MAX_FILE_MB (the 406 rule is for the webhook only)', async () => {
+    const small = await createTestApp({ env: { INBOUND_MAX_FILE_MB: '1' } });
+    try {
+      const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(1024 * 1024 + 1)]);
+      await small
+        .http()
+        .post('/api/invoices/upload')
+        .set('Cookie', cookie)
+        .attach('files', big, { filename: 'big.pdf', contentType: 'application/pdf' })
+        .expect(413);
+      expect(await t.prisma.inboundEmail.count()).toBe(0);
+    } finally {
+      await small.close();
+    }
+  });
 });

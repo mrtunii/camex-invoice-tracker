@@ -1,11 +1,23 @@
+import { emptyExtractionOutputV1 } from '@camex/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExtractionHandler } from '../src/extraction/extraction.handler.js';
 import { EXTRACT_QUEUE } from '../src/extraction/extraction-queue.js';
-import { INVOICE_EXTRACTOR, type InvoiceExtractor } from '../src/extraction/invoice-extractor.js';
-import { RecoverySweep, STUCK_AFTER_MS } from '../src/extraction/recovery-sweep.js';
+import {
+  type ExtractionResult,
+  INVOICE_EXTRACTOR,
+  type InvoiceExtractor,
+  NonRetryableExtractionError,
+} from '../src/extraction/invoice-extractor.js';
+import {
+  GIVE_UP_AFTER_MS,
+  GIVE_UP_ERROR,
+  RecoverySweep,
+  STUCK_AFTER_MS,
+} from '../src/extraction/recovery-sweep.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
 import {
   type TestApp,
+  asmWireOutput,
   createTestApp,
   fixture,
   postMailgun,
@@ -21,7 +33,30 @@ async function ingestOne(t: TestApp): Promise<string> {
   return res.body.invoiceIds[0] as string;
 }
 
-describe('extraction worker (pg-boss, stub extractor)', () => {
+/** What the Anthropic extractor would return for asm.pdf. */
+const asmResult = (): ExtractionResult => ({
+  model: 'claude-sonnet-5-5',
+  promptVersion: 'extract-v1',
+  raw: asmWireOutput(),
+  usage: { inputTokens: 6013, outputTokens: 591 },
+  durationMs: 8012,
+});
+
+async function waitForReview(t: TestApp, invoiceId: string, timeoutMs?: number) {
+  return waitFor(
+    async () => {
+      const row = await t.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      return row.status === 'needs_review' && row;
+    },
+    { timeoutMs },
+  );
+}
+
+async function eventsOf(t: TestApp, invoiceId: string) {
+  return t.prisma.invoiceEvent.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
+}
+
+describe('extraction worker (pg-boss)', () => {
   let t: TestApp;
   let extractor: InvoiceExtractor;
 
@@ -53,9 +88,16 @@ describe('extraction worker (pg-boss, stub extractor)', () => {
       extractionStatus: 'succeeded',
       extractionModel: 'stub',
       extractionPromptVersion: 'stub',
-      extractionRaw: {},
+      extractionRaw: emptyExtractionOutputV1(),
       extractionError: null,
       extractedAt: expect.any(Date),
+      // The stub extracts nothing: every field empty.
+      vendorName: null,
+      invoiceDate: null,
+      totalAmount: null,
+      lineItems: [],
+      bankDetails: null,
+      flags: [],
     });
 
     expect(spy).toHaveBeenCalledTimes(1);
@@ -64,6 +106,7 @@ describe('extraction worker (pg-boss, stub extractor)', () => {
     expect(input).toMatchObject({
       fileName: 'asm.pdf',
       email: { from: 'billing@vendor.example', subject: 'Invoice 42' },
+      invoiceId,
     });
 
     const events = await t.prisma.invoiceEvent.findMany({
@@ -73,11 +116,124 @@ describe('extraction worker (pg-boss, stub extractor)', () => {
     expect(events.map((e) => e.type)).toEqual(['received', 'extracted']);
     expect(events[1]).toMatchObject({
       userId: null,
-      data: { model: 'stub', promptVersion: 'stub' },
+      data: {
+        model: 'stub',
+        promptVersion: 'stub',
+        inputTokens: 0,
+        outputTokens: 0,
+        durationMs: 500,
+      },
     });
   });
 
-  it('after the last of 3 failed attempts: extraction failed, needs_review, one `extraction_failed`', async () => {
+  it('stores every normalized field, the raw output and the token usage', async () => {
+    vi.spyOn(extractor, 'extract').mockResolvedValue(asmResult());
+    const invoiceId = await ingestOne(t);
+    const invoice = await waitForReview(t, invoiceId);
+
+    expect(invoice).toMatchObject({
+      extractionStatus: 'succeeded',
+      extractionModel: 'claude-sonnet-5-5',
+      extractionPromptVersion: 'extract-v1',
+      extractionRaw: asmWireOutput(),
+      documentType: 'invoice',
+      vendorName: 'Aviation Services Management FZE',
+      vendorTaxId: '100000894400003',
+      invoiceNumber: 'SI-000218719',
+      paymentTermsDays: 0,
+      disputeWindowDays: 14,
+      category: 'fuel',
+      airportIcao: 'LHBP',
+      airportIata: 'BUD',
+      // normalized from the wire's "4LCME" and ["CMS503/4"]
+      aircraftRegistration: '4L-CME',
+      flightNumbers: ['CMS503', 'CMS504'],
+      currency: 'USD',
+      amountDueCurrency: 'USD',
+      notes: expect.stringMatching(/^Transfer fees/),
+      vendorId: null,
+      disputeDeadline: null,
+      flags: [],
+    });
+    // date columns
+    expect(invoice.invoiceDate?.toISOString()).toBe('2026-09-16T00:00:00.000Z');
+    expect(invoice.serviceDate?.toISOString()).toBe('2026-09-14T00:00:00.000Z');
+    expect(invoice.dueDate?.toISOString()).toBe('2026-09-16T00:00:00.000Z');
+    // numeric columns
+    expect(invoice.totalAmount?.toFixed()).toBe('15617.79');
+    expect(invoice.amountDue?.toFixed()).toBe('15617.79');
+    expect(invoice.taxAmount?.toFixed()).toBe('0');
+    // jsonb: snake_case keys, decimals as the strings returned
+    expect(invoice.lineItems).toEqual([
+      {
+        kind: 'item',
+        description: 'Fuel',
+        quantity: '2814.2691',
+        uom: 'USG',
+        unit_price: '5.5495',
+        amount: '15617.79',
+      },
+    ]);
+    expect(invoice.bankDetails).toEqual({
+      beneficiary: null,
+      bank_name: 'Standard Chartered Bank',
+      iban: 'AE300440000101236468501',
+      account_number: null,
+      swift: 'SCBLAEADXXX',
+      routing_number: null,
+      currency: 'USD',
+    });
+
+    const events = await eventsOf(t, invoiceId);
+    expect(events.map((e) => e.type)).toEqual(['received', 'extracted']);
+    expect(events[1]?.data).toEqual({
+      model: 'claude-sonnet-5-5',
+      promptVersion: 'extract-v1',
+      inputTokens: 6013,
+      outputTokens: 591,
+      durationMs: 8012,
+    });
+  });
+
+  it('a non-retryable error fails the extraction after one attempt and completes the job', async () => {
+    const raw = { documentType: 'invoice', vendorNa: '' };
+    const spy = vi.spyOn(extractor, 'extract').mockRejectedValue(
+      new NonRetryableExtractionError('Model output was cut off at max_tokens (8192)', {
+        raw,
+        model: 'claude-sonnet-5-5',
+        promptVersion: 'extract-v1',
+      }),
+    );
+    const invoiceId = await ingestOne(t);
+    const invoice = await waitForReview(t, invoiceId);
+
+    expect(invoice).toMatchObject({
+      extractionStatus: 'failed',
+      extractionError: 'Model output was cut off at max_tokens (8192)',
+      extractionRaw: raw,
+      extractionModel: 'claude-sonnet-5-5',
+      extractionPromptVersion: 'extract-v1',
+      extractedAt: null,
+    });
+    const events = await eventsOf(t, invoiceId);
+    expect(events.map((e) => e.type)).toEqual(['received', 'extraction_failed']);
+    expect(events[1]?.data).toEqual({
+      error: 'Model output was cut off at max_tokens (8192)',
+      attempts: 1,
+      retryable: false,
+    });
+
+    // Completed, not failed: pg-boss has nothing to retry.
+    const boss = await t.app.get(JobsService).ready();
+    const jobs = await waitFor(async () => {
+      const found = await boss.findJobs(EXTRACT_QUEUE, { key: invoiceId });
+      return found[0]?.state === 'completed' && found;
+    });
+    expect(jobs.map((j) => [j.state, j.retryCount])).toEqual([['completed', 0]]);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retryable errors get 3 attempts, then extraction failed, needs_review, one `extraction_failed`', async () => {
     const spy = vi.spyOn(extractor, 'extract').mockRejectedValue(new Error('model unavailable'));
     const invoiceId = await ingestOne(t);
 
@@ -146,14 +302,14 @@ describe('recovery sweep', () => {
       WHERE id = ${stuckId}::uuid`;
 
     const sweep = t.app.get(RecoverySweep);
-    expect(await sweep.run()).toEqual([stuckId]);
+    expect(await sweep.run()).toEqual({ reenqueued: [stuckId], failed: [] });
 
     const boss = await t.app.get(JobsService).ready();
     expect(await boss.findJobs(EXTRACT_QUEUE, { key: stuckId })).toHaveLength(1);
     expect(await boss.findJobs(EXTRACT_QUEUE, { key: freshId })).toHaveLength(0);
 
     // Still stuck on the next run, but its job is queued: nothing new.
-    expect(await sweep.run()).toEqual([]);
+    expect(await sweep.run()).toEqual({ reenqueued: [], failed: [] });
     expect(await boss.findJobs(EXTRACT_QUEUE, { key: stuckId })).toHaveLength(1);
   });
 
@@ -163,6 +319,38 @@ describe('recovery sweep', () => {
     await t.prisma.$executeRaw`
       UPDATE invoices SET status = 'needs_review', updated_at = now() - interval '1 hour'
       WHERE id = ${id}::uuid`;
-    expect(await t.app.get(RecoverySweep).run()).toEqual([]);
+    expect(await t.app.get(RecoverySweep).run()).toEqual({ reenqueued: [], failed: [] });
+  });
+
+  it('gives up on invoices stuck for over 60 minutes: failed, needs_review, `extraction_failed`', async () => {
+    const expiredId = await ingestOne(t);
+    const stuckId = await ingestOne(t);
+    await resetJobs(t);
+    await t.prisma.$executeRaw`
+      UPDATE invoices SET updated_at = now() - make_interval(secs => ${GIVE_UP_AFTER_MS / 1000 + 60})
+      WHERE id = ${expiredId}::uuid`;
+    await t.prisma.$executeRaw`
+      UPDATE invoices SET updated_at = now() - interval '59 minutes'
+      WHERE id = ${stuckId}::uuid`;
+
+    expect(await t.app.get(RecoverySweep).run()).toEqual({
+      reenqueued: [stuckId],
+      failed: [expiredId],
+    });
+
+    const expired = await t.prisma.invoice.findUniqueOrThrow({ where: { id: expiredId } });
+    expect(expired).toMatchObject({
+      status: 'needs_review',
+      extractionStatus: 'failed',
+      extractionError: GIVE_UP_ERROR,
+    });
+    expect(GIVE_UP_ERROR).toBe('Extraction did not finish within 60 minutes');
+    const events = await eventsOf(t, expiredId);
+    expect(events.map((e) => e.type)).toEqual(['received', 'extraction_failed']);
+    expect(events[1]?.data).toEqual({ error: GIVE_UP_ERROR, retryable: false });
+
+    const boss = await t.app.get(JobsService).ready();
+    expect(await boss.findJobs(EXTRACT_QUEUE, { key: expiredId })).toHaveLength(0);
+    expect(await boss.findJobs(EXTRACT_QUEUE, { key: stuckId })).toHaveLength(1);
   });
 });

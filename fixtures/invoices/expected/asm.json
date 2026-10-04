@@ -1,0 +1,39 @@
+{
+  "documentType": "invoice",
+  "vendorName": "Aviation Services Management FZE",
+  "vendorTaxId": "100000894400003",
+  "billToName": "Camex Airlines LLC",
+  "invoiceNumber": "SI-000218719",
+  "invoiceDate": "2026-09-16",
+  "serviceDate": "2026-09-14",
+  "dueDate": "2026-09-16",
+  "paymentTermsText": "0 Days",
+  "paymentTermsDays": 0,
+  "disputeWindowDays": 14,
+  "category": "fuel",
+  "description": "Jet fuel uplift, BUD, 4L-CME, CMS503/4",
+  "airportIcao": "LHBP",
+  "airportIata": "BUD",
+  "locationText": "LHBP/BUD Ferihegy",
+  "aircraftRegistration": "4L-CME",
+  "flightNumbers": ["CMS503", "CMS504"],
+  "currency": "USD",
+  "subtotalAmount": "15617.79",
+  "taxAmount": "0.00",
+  "totalAmount": "15617.79",
+  "amountDue": "15617.79",
+  "amountDueCurrency": "USD",
+  "lineItems": [
+    { "kind": "item", "description": "Fuel", "quantity": "2814.2691", "uom": "USG", "unitPrice": "5.5495", "amount": "15617.79" }
+  ],
+  "bankDetails": {
+    "beneficiary": null,
+    "bankName": "Standard Chartered Bank",
+    "iban": "AE300440000101236468501",
+    "accountNumber": null,
+    "swift": "SCBLAEADXXX",
+    "routingNumber": null,
+    "currency": "USD"
+  },
+  "notes": "Transfer fees are charged to the client. Interest of 1% per month on invoices not settled by the due date. Deemed correct unless a written objection reaches ar@asm.aero within 14 days of the invoice date."
+}

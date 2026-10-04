@@ -42,7 +42,21 @@ pnpm simulate:mailgun --message-id '<demo@vendor>'    # run twice: the second re
 pnpm simulate:mailgun --bad-signature                 # 401
 ```
 
-The emails appear on `/inbox`. Each PDF becomes an invoice that moves from Processing to Needs review within a few seconds (T02 uses a stub extractor). Manual upload is on the same page.
+The emails appear on `/inbox`. Each PDF becomes an invoice that moves from Processing to Needs review within a few seconds. Manual upload is on the same page.
+
+## Extraction
+
+With `EXTRACTOR_PROVIDER=stub` (the `.env.example` default) nothing is extracted and no API is called. For real extraction set `EXTRACTOR_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` in `.env`; each invoice costs about $0.02 with the default `EXTRACTION_MODEL=claude-sonnet-5-5`. `GET /api/invoices/:id` returns the extracted fields.
+
+The eval runs the real extractor and normalization on every `fixtures/invoices/<name>.pdf` that has a golden file `fixtures/invoices/expected/<name>.json`, and fails on any scored mismatch. It calls the API (needs `ANTHROPIC_API_KEY`), is not part of `pnpm test`, and should be run on every prompt or model change:
+
+```sh
+pnpm eval:extraction                                 # every fixture once
+pnpm eval:extraction --fixture aeg --repeat 3        # one fixture, three times
+pnpm eval:extraction --model claude-opus-5-5         # another model
+```
+
+The normalized output of the last run is written to `fixtures/invoices/eval-out/` (gitignored). The prompt is `apps/api/src/extraction/prompts/extract-v1.ts`; any change to it gets a new version.
 
 ## Everyday commands
 
@@ -56,6 +70,7 @@ The emails appear on `/inbox`. Each PDF becomes an invoice that moves from Proce
 | `pnpm db:migrate`                                     | apply committed migrations (`prisma migrate deploy`)                               |
 | `pnpm db:migrate:dev --name <name>`                   | create a new migration from `schema.prisma` changes                                |
 | `pnpm simulate:mailgun [flags]`                       | signed Mailgun webhook POSTs to the local API (`--help` for flags)                 |
+| `pnpm eval:extraction [flags]`                        | extraction eval against the golden files (calls the Anthropic API; `--help`)       |
 | `pnpm create-admin --email … --name … [--password …]` | create an admin from the command line (local development)                          |
 
 Background jobs (extraction, recovery sweep) run in the API process on pg-boss, in the `pgboss` schema of the same database. Set `WORKERS_ENABLED=false` to run an API process without workers.

@@ -1,10 +1,19 @@
 import { setTimeout as sleep } from 'node:timers/promises';
+import { emptyExtractionOutputV1 } from '@camex/shared';
 import type { ExtractionResult, InvoiceExtractor } from './invoice-extractor.js';
 
-/** T02 placeholder: no LLM call, an empty result after a short delay. T03 adds the real provider. */
+const DELAY_MS = 500;
+
+/** No LLM call: a valid, all-empty output after a short delay (local dev and tests). */
 export class StubExtractor implements InvoiceExtractor {
   async extract(): Promise<ExtractionResult> {
-    await sleep(500);
-    return { model: 'stub', promptVersion: 'stub', raw: {} };
+    await sleep(DELAY_MS);
+    return {
+      model: 'stub',
+      promptVersion: 'stub',
+      raw: emptyExtractionOutputV1(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+      durationMs: DELAY_MS,
+    };
   }
 }

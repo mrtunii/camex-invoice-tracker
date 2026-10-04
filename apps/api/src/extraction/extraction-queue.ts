@@ -4,17 +4,13 @@ import { z } from 'zod';
 import { ENV } from '../config/env.module.js';
 import type { Env } from '../config/env.js';
 import { JobsService } from '../jobs/jobs.service.js';
+import { EXTRACT_EXPIRE_SECONDS } from './job-limits.js';
 
 export const EXTRACT_QUEUE = 'invoice.extract';
 export const RECOVER_QUEUE = 'invoice.recover';
 
 /** 3 attempts in total. */
 export const EXTRACT_RETRY_LIMIT = 2;
-/**
- * An attempt still running after this long is treated as failed (and retried). Below the
- * recovery sweep's 10-minute threshold, so a hung attempt is retried before it is swept.
- */
-const EXTRACT_EXPIRE_SECONDS = 5 * 60;
 
 export const extractJobDataSchema = z.object({ invoiceId: z.uuid() });
 export type ExtractJobData = z.infer<typeof extractJobDataSchema>;

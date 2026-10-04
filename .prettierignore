@@ -6,3 +6,5 @@ apps/api/prisma/migrations/
 fixtures/
 .remember/
 docs/SPEC.md
+# CTO-provided task prompts, committed as written
+docs/tasks/

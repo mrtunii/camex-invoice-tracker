@@ -6,29 +6,20 @@ import { ExtractionModule } from '../extraction/extraction.module.js';
 import { IngestionService } from './ingestion.service.js';
 import { InvoiceUploadController } from './invoice-upload.controller.js';
 import { MailgunController } from './mailgun.controller.js';
-
-const MB = 1024 * 1024;
+import { MailgunFilesInterceptor } from './mailgun-files.interceptor.js';
+import { inboundMulterOptions } from './webhook-limits.js';
 
 @Module({
   imports: [
     ExtractionModule,
     // Memory storage (multer's default without `dest`); files never touch the local disk.
+    // (Manual upload; the webhook parses with MailgunFilesInterceptor and the same limits.)
     MulterModule.registerAsync({
       inject: [ENV],
-      useFactory: (env: Env) => ({
-        limits: {
-          fileSize: env.INBOUND_MAX_FILE_MB * MB,
-          files: env.INBOUND_MAX_FILES,
-          // Text fields (body-plain, body-html, message-headers, …) and their count.
-          fieldSize: 10 * MB,
-          fields: 500,
-        },
-        // Attachment names are UTF-8 in practice (multer's default is latin1).
-        defParamCharset: 'utf8',
-      }),
+      useFactory: (env: Env) => inboundMulterOptions(env),
     }),
   ],
   controllers: [MailgunController, InvoiceUploadController],
-  providers: [IngestionService],
+  providers: [IngestionService, MailgunFilesInterceptor],
 })
 export class IngestionModule {}

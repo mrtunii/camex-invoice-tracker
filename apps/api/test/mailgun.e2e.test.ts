@@ -1,6 +1,20 @@
+import { request as httpRequest, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { buffer } from 'node:stream/consumers';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Logger } from '@nestjs/common';
+import {
+  type MockInstance,
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { EXTRACT_QUEUE } from '../src/extraction/extraction-queue.js';
 import { sha256Hex } from '../src/ingestion/files.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
@@ -275,14 +289,140 @@ describe('POST /api/inbound/mailgun', () => {
     expect(email.invoices[0]?.fileName).toBe('ინვოისი №510.pdf');
   });
 
-  it('rejects a file over INBOUND_MAX_FILE_MB with 413 and stores nothing', async () => {
-    const small = await createTestApp({ env: { INBOUND_MAX_FILE_MB: '1' } });
-    try {
-      const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(1024 * 1024 + 1)]);
-      await postMailgun(small, { attachments: [pdf('big.pdf', big)] }).expect(413);
+  describe('limits: every violation is 406, so Mailgun stops retrying', () => {
+    const MB = 1024 * 1024;
+    let small: TestApp;
+    let errorLog: MockInstance<Logger['error']>;
+
+    beforeAll(async () => {
+      // The file limit sits above the request cap, so only the request cap can trip here.
+      small = await createTestApp({
+        env: { INBOUND_MAX_REQUEST_MB: '1', INBOUND_MAX_FILE_MB: '2', INBOUND_MAX_FILES: '2' },
+      });
+    });
+    afterAll(() => small.close());
+    beforeEach(() => {
+      errorLog = vi.spyOn(Logger.prototype, 'error');
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function nothingStored(before: number): Promise<void> {
+      await sleep(200); // a request that slipped through would have committed by now
       expect(await t.prisma.inboundEmail.count()).toBe(0);
-    } finally {
-      await small.close();
+      expect(await t.prisma.invoice.count()).toBe(0);
+      expect(await objectCount()).toBe(before);
     }
+
+    function limitLogged(limit: string): void {
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.objectContaining({ limit, ip: expect.any(String) }),
+        'mailgun webhook rejected: limit exceeded',
+      );
+    }
+
+    /**
+     * Raw HTTP, because supertest always sends a complete body. Writes `body` (nothing for a
+     * header-only request) and resolves with the status of the response, without finishing
+     * the request. Stopping right after the cap means the server has read everything sent,
+     * so it can close cleanly instead of resetting the connection under the response.
+     */
+    async function rawPost(headers: Record<string, string>, body?: Buffer): Promise<number> {
+      const server: Server = small.app.getHttpServer();
+      if (!server.listening) {
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      }
+      const { port } = server.address() as AddressInfo;
+      return new Promise<number>((resolve, reject) => {
+        const req = httpRequest({
+          host: '127.0.0.1',
+          port,
+          method: 'POST',
+          path: '/api/inbound/mailgun',
+          headers,
+        });
+        let answered = false;
+        req.on('response', (res) => {
+          answered = true;
+          res.resume();
+          resolve(res.statusCode ?? 0);
+          req.destroy();
+        });
+        req.on('error', (error) => {
+          if (!answered) reject(error);
+        });
+        if (body) req.write(body);
+        else req.flushHeaders();
+      });
+    }
+
+    it('rejects a Content-Length over INBOUND_MAX_REQUEST_MB without reading the body', async () => {
+      const before = await objectCount();
+      const status = await rawPost({
+        'content-type': 'multipart/form-data; boundary=x',
+        'content-length': String(2 * MB),
+      });
+      expect(status).toBe(406);
+      limitLogged('INBOUND_MAX_REQUEST_MB');
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.objectContaining({ contentLength: String(2 * MB) }),
+        expect.any(String),
+      );
+      await nothingStored(before);
+    });
+
+    it('stops a chunked body (no Content-Length) once it passes INBOUND_MAX_REQUEST_MB', async () => {
+      const before = await objectCount();
+      const head = Buffer.from(
+        '--x\r\nContent-Disposition: form-data; name="attachment-1"; filename="big.pdf"\r\n' +
+          'Content-Type: application/pdf\r\n\r\n%PDF-1.7\n',
+      );
+      const status = await rawPost(
+        { 'content-type': 'multipart/form-data; boundary=x', 'transfer-encoding': 'chunked' },
+        Buffer.concat([head, Buffer.alloc(MB + 64 * 1024, 0x41)]),
+      );
+      expect(status).toBe(406);
+      limitLogged('INBOUND_MAX_REQUEST_MB');
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      await nothingStored(before);
+    });
+
+    it('rejects a Content-Length over the cap on the urlencoded path (no attachments) too', async () => {
+      const status = await rawPost({
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-length': String(2 * MB),
+      });
+      expect(status).toBe(406);
+    });
+
+    it('rejects a file over INBOUND_MAX_FILE_MB (was 413)', async () => {
+      const before = await objectCount();
+      const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(MB + 1)]);
+      // Default 30 MB request cap, so the file limit is the one hit.
+      const app = await createTestApp({ env: { INBOUND_MAX_FILE_MB: '1' } });
+      try {
+        const res = await postMailgun(app, { attachments: [pdf('big.pdf', big)] }).expect(406);
+        expect(res.body.message).toBe('Message exceeds the inbound limits');
+      } finally {
+        await app.close();
+      }
+      limitLogged('INBOUND_MAX_FILE_MB');
+      await nothingStored(before);
+    });
+
+    it('rejects more than INBOUND_MAX_FILES attachments', async () => {
+      const before = await objectCount();
+      await postMailgun(small, { attachments: [pdf('a.pdf'), pdf('b.pdf'), pdf('c.pdf')] }).expect(
+        406,
+      );
+      limitLogged('INBOUND_MAX_FILES');
+      await nothingStored(before);
+    });
+
+    it('still accepts a normal email under every limit', async () => {
+      await postMailgun(small, { attachments: [pdf('a.pdf')] }).expect(200);
+      expect(errorLog).not.toHaveBeenCalled();
+    });
   });
 });

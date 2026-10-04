@@ -9,7 +9,6 @@ import {
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import {
   type IngestResult,
   type MailgunInboundForm,
@@ -20,6 +19,7 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { ENV } from '../config/env.module.js';
 import type { Env } from '../config/env.js';
 import { IngestionService } from './ingestion.service.js';
+import { MailgunFilesInterceptor } from './mailgun-files.interceptor.js';
 import {
   headerValue,
   parseEmailAddress,
@@ -51,7 +51,7 @@ export class MailgunController {
 
   @Post('mailgun')
   @HttpCode(200)
-  @UseInterceptors(AnyFilesInterceptor())
+  @UseInterceptors(MailgunFilesInterceptor)
   async receive(
     @Body(new ZodValidationPipe(mailgunInboundFormSchema)) form: MailgunInboundForm,
     @UploadedFiles() files: UploadedFile[] | undefined,

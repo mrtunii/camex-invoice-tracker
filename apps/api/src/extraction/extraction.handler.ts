@@ -1,14 +1,18 @@
 import { buffer } from 'node:stream/consumers';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client.js';
+import type { ExtractedInvoice } from '@camex/shared';
+import { extractedInvoiceColumns } from '../invoices/invoice-columns.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
+import { errorMessage, failExtraction, toJsonColumn } from './extraction-failure.js';
 import { extractJobDataSchema } from './extraction-queue.js';
 import {
   type ExtractionResult,
   INVOICE_EXTRACTOR,
   type InvoiceExtractor,
+  NonRetryableExtractionError,
 } from './invoice-extractor.js';
+import { normalizeExtraction } from './normalize.js';
 
 /** What the handler needs from a pg-boss job (fetched with includeMetadata). */
 export interface ExtractionAttempt {
@@ -18,29 +22,10 @@ export interface ExtractionAttempt {
   retryLimit: number;
 }
 
-const MAX_ERROR_LENGTH = 1000;
-
-function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.slice(0, MAX_ERROR_LENGTH);
-}
-
 /**
- * jsonb-safe copy of provider output: drops undefined/functions and strips NUL characters,
- * which Postgres rejects in jsonb strings.
- */
-function toJsonColumn(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  const json: unknown = JSON.parse(
-    JSON.stringify(value ?? null, (_key, v: unknown) =>
-      typeof v === 'string' ? v.replaceAll('\u0000', '') : v,
-    ),
-  );
-  return json === null ? Prisma.JsonNull : (json as Prisma.InputJsonValue);
-}
-
-/**
- * Runs one extraction attempt for one invoice (SPEC §7, T02: storage of the raw result only;
- * T03 adds mapping). Idempotent: an invoice that is no longer `processing` is left alone.
+ * Runs one extraction attempt for one invoice (SPEC §7): extract → normalize → store every
+ * field → needs_review. Idempotent: an invoice that is no longer `processing` is left alone.
+ * (Vendor matching, derived dates and flags come in T04.)
  */
 @Injectable()
 export class ExtractionHandler {
@@ -77,32 +62,65 @@ export class ExtractionHandler {
         pdf,
         fileName: invoice.fileName,
         email: { from: invoice.inboundEmail.fromAddress, subject: invoice.inboundEmail.subject },
+        invoiceId,
       });
-      await this.storeSuccess(invoiceId, result);
+      await this.storeSuccess(invoiceId, result, normalizeExtraction(result.raw));
       this.logger.log(
-        { invoiceId, attempt, model: result.model, promptVersion: result.promptVersion },
+        {
+          invoiceId,
+          attempt,
+          model: result.model,
+          promptVersion: result.promptVersion,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          durationMs: result.durationMs,
+        },
         'extraction succeeded',
       );
     } catch (error) {
+      const message = errorMessage(error);
+      if (error instanceof NonRetryableExtractionError) {
+        // Retrying can't help: fail now and let the job complete, so pg-boss doesn't retry.
+        this.logger.warn(
+          { invoiceId, attempt, retryable: false, err: message },
+          'extraction failed',
+        );
+        await failExtraction(this.prisma, invoiceId, {
+          error: message,
+          event: { attempts: attempt, retryable: false },
+          output: error.output,
+        });
+        return;
+      }
+
       // pg-boss counts attempts in retryCount (0-based) and stops retrying once it reaches
       // retryLimit, so this attempt is the last one when they are equal.
       const isFinalAttempt = job.retryCount >= job.retryLimit;
-      const message = errorMessage(error);
       this.logger.warn(
         { invoiceId, attempt, attempts, final: isFinalAttempt, err: message },
         'extraction attempt failed',
       );
-      if (isFinalAttempt) await this.storeFailure(invoiceId, message, attempt);
+      if (isFinalAttempt) {
+        await failExtraction(this.prisma, invoiceId, {
+          error: message,
+          event: { attempts: attempt },
+        });
+      }
       throw error;
     }
   }
 
-  private async storeSuccess(invoiceId: string, result: ExtractionResult): Promise<void> {
+  private async storeSuccess(
+    invoiceId: string,
+    result: ExtractionResult,
+    extracted: ExtractedInvoice,
+  ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       // Conditional on status so a concurrent run can't apply a second result.
       const { count } = await tx.invoice.updateMany({
         where: { id: invoiceId, status: 'processing' },
         data: {
+          ...extractedInvoiceColumns(extracted),
           extractionRaw: toJsonColumn(result.raw),
           extractionModel: result.model,
           extractionPromptVersion: result.promptVersion,
@@ -117,22 +135,14 @@ export class ExtractionHandler {
         data: {
           invoiceId,
           type: 'extracted',
-          data: { model: result.model, promptVersion: result.promptVersion },
+          data: {
+            model: result.model,
+            promptVersion: result.promptVersion,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            durationMs: result.durationMs,
+          },
         },
-      });
-    });
-  }
-
-  /** After the last attempt: a human enters the data instead (SPEC §7 failures). */
-  private async storeFailure(invoiceId: string, message: string, attempts: number): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.invoice.updateMany({
-        where: { id: invoiceId, status: 'processing' },
-        data: { extractionStatus: 'failed', extractionError: message, status: 'needs_review' },
-      });
-      if (count === 0) return;
-      await tx.invoiceEvent.create({
-        data: { invoiceId, type: 'extraction_failed', data: { error: message, attempts } },
       });
     });
   }

@@ -20,8 +20,11 @@ describe('parseEnv', () => {
       S3_REGION: 'us-east-1',
       S3_FORCE_PATH_STYLE: false,
       BOOTSTRAP_ADMIN_NAME: 'Admin',
+      INBOUND_MAX_REQUEST_MB: 30,
       INBOUND_MAX_FILE_MB: 25,
       INBOUND_MAX_FILES: 20,
+      EXTRACTION_MODEL: 'claude-sonnet-5-5',
+      EXTRACTION_TIMEOUT_SECONDS: 90,
       EXTRACTION_RETRY_DELAY_SECONDS: 30,
       WORKERS_ENABLED: true,
     });
@@ -76,6 +79,34 @@ describe('parseEnv', () => {
         expect(String(error)).not.toContain('short-pw');
         expect(String(error)).not.toContain(PASSWORD);
       }
+    });
+  });
+
+  describe('extraction provider', () => {
+    it('requires ANTHROPIC_API_KEY for the anthropic provider, without echoing anything', () => {
+      const attempt = () => parseEnv({ ...valid, EXTRACTOR_PROVIDER: 'anthropic' });
+      expect(attempt).toThrow(/ANTHROPIC_API_KEY: required when EXTRACTOR_PROVIDER=anthropic/);
+      expect(attempt).toThrow(EnvValidationError);
+
+      const key = 'sk-ant-test-key-never-printed';
+      const env = parseEnv({ ...valid, EXTRACTOR_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: key });
+      expect(env).toMatchObject({ EXTRACTOR_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: key });
+      try {
+        parseEnv({ ...valid, EXTRACTOR_PROVIDER: 'nope', ANTHROPIC_API_KEY: key });
+        expect.unreachable();
+      } catch (error) {
+        expect(String(error)).toMatch(/EXTRACTOR_PROVIDER/);
+        expect(String(error)).not.toContain(key);
+      }
+    });
+
+    it('keeps two provider calls inside the 300 s job expiry', () => {
+      expect(
+        parseEnv({ ...valid, EXTRACTION_TIMEOUT_SECONDS: '149' }).EXTRACTION_TIMEOUT_SECONDS,
+      ).toBe(149);
+      expect(() => parseEnv({ ...valid, EXTRACTION_TIMEOUT_SECONDS: '150' })).toThrow(
+        /EXTRACTION_TIMEOUT_SECONDS: must be below 150/,
+      );
     });
   });
 

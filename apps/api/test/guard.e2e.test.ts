@@ -48,6 +48,7 @@ describe('global session guard', () => {
     ['get', '/api/inbox'],
     ['get', '/api/inbox/00000000-0000-0000-0000-000000000000'],
     ['post', '/api/invoices/upload'],
+    ['get', '/api/invoices/00000000-0000-0000-0000-000000000000'],
     ['get', '/api/invoices/00000000-0000-0000-0000-000000000000/file'],
     ['get', '/api/probe/private'],
   ] as const)('blocks unauthenticated %s %s with 401', async (method, path) => {

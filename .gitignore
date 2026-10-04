@@ -11,5 +11,8 @@ coverage/
 # Prisma client is generated on install (apps/api/src/generated)
 apps/api/src/generated/
 
+# extraction eval output (pnpm eval:extraction)
+fixtures/invoices/eval-out/
+
 # local tool state
 .remember/

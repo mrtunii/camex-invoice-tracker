@@ -1,0 +1,39 @@
+{
+  "documentType": "invoice",
+  "vendorName": "Petrocas Fuel Services Georgia LLC",
+  "vendorTaxId": null,
+  "billToName": "Camex Airlines LLC",
+  "invoiceNumber": "PFSG-CAM-00000000510",
+  "invoiceDate": "2026-10-02",
+  "serviceDate": "2026-10-01",
+  "dueDate": null,
+  "paymentTermsText": null,
+  "paymentTermsDays": null,
+  "disputeWindowDays": null,
+  "category": "fuel",
+  "description": "Jet A-1 uplift, TBS, 01.10.2026",
+  "airportIcao": "UGTB",
+  "airportIata": "TBS",
+  "locationText": "Tbilisi International Airport",
+  "aircraftRegistration": null,
+  "flightNumbers": [],
+  "currency": "USD",
+  "subtotalAmount": "34074.55",
+  "taxAmount": null,
+  "totalAmount": "34074.55",
+  "amountDue": "88753.98",
+  "amountDueCurrency": "GEL",
+  "lineItems": [
+    { "kind": "item", "description": "JET A-1 (ticket 71583, 23,748 L / 18,737 kg)", "quantity": "18.737", "uom": "MT", "unitPrice": "1818.57", "amount": "34074.55" }
+  ],
+  "bankDetails": {
+    "beneficiary": "PETROCAS FUEL SERVICES GEORGIA LLC",
+    "bankName": "TBC Bank",
+    "iban": "GE71TB7692036030100001",
+    "accountNumber": null,
+    "swift": "TBCBGE22",
+    "routingNumber": null,
+    "currency": "GEL"
+  },
+  "notes": "Remit the full value by TT in GEL (USD 34,074.55 at exchange rate 2.6047)."
+}
