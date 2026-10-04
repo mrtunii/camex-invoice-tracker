@@ -1,0 +1,34 @@
+{
+  "name": "camex-invoice-tracker",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.8.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "postinstall": "pnpm --filter @camex/shared build && pnpm --filter @camex/api prisma:generate",
+    "dev": "concurrently -k -n shared,api,web -c gray,blue,magenta \"pnpm --filter @camex/shared dev\" \"pnpm --filter @camex/api dev\" \"pnpm --filter @camex/web dev\"",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @camex/api start",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @camex/api db:migrate",
+    "db:migrate:dev": "pnpm --filter @camex/api db:migrate:dev",
+    "create-admin": "pnpm --filter @camex/api create-admin"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^10.0.5",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.71.0"
+  }
+}

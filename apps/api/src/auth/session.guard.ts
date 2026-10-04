@@ -1,0 +1,49 @@
+import {
+  type CanActivate,
+  type ExecutionContext,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import type { Response } from 'express';
+import { ENV } from '../config/env.module.js';
+import type { Env } from '../config/env.js';
+import type { RequestWithAuth } from './auth-context.js';
+import { IS_PUBLIC } from './public.decorator.js';
+import { clearSessionCookie, readSessionCookie, setSessionCookie } from './session-token.js';
+import { SessionsService } from './sessions.service.js';
+
+/** Global guard: every route needs a valid session unless marked @Public(). */
+@Injectable()
+export class SessionGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly sessions: SessionsService,
+    @Inject(ENV) private readonly env: Env,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isPublic = this.reflector.getAllAndOverride<boolean | undefined>(IS_PUBLIC, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
+    const http = context.switchToHttp();
+    const req = http.getRequest<RequestWithAuth>();
+    const res = http.getResponse<Response>();
+    const secure = this.env.NODE_ENV === 'production';
+
+    const token = readSessionCookie(req);
+    const session = token ? await this.sessions.validate(token) : null;
+    if (!token || !session) {
+      if (token) clearSessionCookie(res, secure);
+      throw new UnauthorizedException('Not authenticated');
+    }
+
+    if (session.extendedUntil) setSessionCookie(res, token, session.extendedUntil, secure);
+    req.auth = { user: session.user, sessionId: session.sessionId };
+    return true;
+  }
+}

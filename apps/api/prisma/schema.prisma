@@ -1,0 +1,300 @@
+// Full data model from docs/SPEC.md §5.
+// Conventions: uuid ids, timestamptz timestamps, `date` for calendar dates,
+// money numeric(18,4), unit prices numeric(18,6), quantities numeric(18,4), currency char(3).
+// TypeScript fields are camelCase; tables, columns and enum types are snake_case.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum InboundEmailProvider {
+  mailgun
+  manual
+
+  @@map("inbound_email_provider")
+}
+
+enum InvoiceStatus {
+  processing
+  needs_review
+  unpaid
+  paid
+  rejected
+
+  @@map("invoice_status")
+}
+
+enum ExtractionStatus {
+  pending
+  succeeded
+  failed
+
+  @@map("extraction_status")
+}
+
+enum DocumentType {
+  invoice
+  credit_note
+  proforma
+  statement
+  other
+
+  @@map("document_type")
+}
+
+enum InvoiceCategory {
+  fuel
+  ground_handling
+  airport_charges
+  navigation
+  catering
+  maintenance
+  crew
+  other
+
+  @@map("invoice_category")
+}
+
+enum RejectionReason {
+  duplicate
+  not_invoice
+  disputed
+  other
+
+  @@map("rejection_reason")
+}
+
+enum InvoiceEventType {
+  received
+  extracted
+  extraction_failed
+  edited
+  approved
+  rejected
+  paid
+  payment_undone
+  reopened
+  reextracted
+  vendor_linked
+  bank_account_trusted
+
+  @@map("invoice_event_type")
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Always lowercase (also enforced by a CHECK constraint in the migration).
+  email        String    @unique
+  name         String
+  passwordHash String    @map("password_hash")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdById  String?   @map("created_by_id") @db.Uuid
+
+  createdBy      User?          @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers   User[]         @relation("UserCreatedBy")
+  sessions       Session[]
+  uploadedEmails InboundEmail[]
+  approved       Invoice[]      @relation("InvoiceApprovedBy")
+  paid           Invoice[]      @relation("InvoicePaidBy")
+  rejected       Invoice[]      @relation("InvoiceRejectedBy")
+  invoiceEvents  InvoiceEvent[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  /// Hex SHA-256 of the cookie token. The token itself is never stored.
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ─── Ingestion ────────────────────────────────────────────────────────────────
+
+model InboundEmail {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider     InboundEmailProvider
+  /// Message-Id header; unique for idempotent webhook delivery. Null for manual uploads.
+  messageId    String?              @unique @map("message_id")
+  fromAddress  String?              @map("from_address")
+  sender       String?
+  recipient    String?
+  subject      String?
+  /// First 20k characters of the plain-text body.
+  bodyText     String?              @map("body_text")
+  headers      Json?
+  /// [{filename, content_type, size, processed}]
+  attachments  Json                 @default("[]")
+  receivedAt   DateTime             @map("received_at") @db.Timestamptz(3)
+  uploadedById String?              @map("uploaded_by_id") @db.Uuid
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  uploadedBy User?     @relation(fields: [uploadedById], references: [id])
+  invoices   Invoice[]
+
+  @@map("inbound_emails")
+}
+
+// ─── Vendors ──────────────────────────────────────────────────────────────────
+
+model Vendor {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                    String
+  aliases                 String[] @default([])
+  emailDomains            String[] @default([]) @map("email_domains")
+  defaultPaymentTermsDays Int?     @map("default_payment_terms_days")
+  /// [{beneficiary, bank_name, iban, account_number, swift, routing_number, currency, added_at, added_by_id}]
+  bankAccounts            Json     @default("[]") @map("bank_accounts")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  invoices Invoice[]
+
+  @@map("vendors")
+}
+
+// ─── Invoices ─────────────────────────────────────────────────────────────────
+
+/// One row per PDF.
+model Invoice {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // source
+  inboundEmailId String @map("inbound_email_id") @db.Uuid
+  fileKey        String @map("file_key")
+  fileName       String @map("file_name")
+  fileSha256     String @map("file_sha256")
+  fileSize       Int    @map("file_size")
+  pageCount      Int?   @map("page_count")
+
+  status InvoiceStatus @default(processing)
+
+  // extraction
+  extractionStatus        ExtractionStatus @default(pending) @map("extraction_status")
+  extractionError         String?          @map("extraction_error")
+  extractionRaw           Json?            @map("extraction_raw")
+  extractionModel         String?          @map("extraction_model")
+  extractionPromptVersion String?          @map("extraction_prompt_version")
+  extractedAt             DateTime?        @map("extracted_at") @db.Timestamptz(3)
+
+  documentType DocumentType? @map("document_type")
+
+  // parties
+  vendorId    String? @map("vendor_id") @db.Uuid
+  vendorName  String? @map("vendor_name")
+  vendorTaxId String? @map("vendor_tax_id")
+  billToName  String? @map("bill_to_name")
+
+  invoiceNumber String? @map("invoice_number")
+
+  // dates
+  invoiceDate     DateTime? @map("invoice_date") @db.Date
+  serviceDate     DateTime? @map("service_date") @db.Date
+  dueDate         DateTime? @map("due_date") @db.Date
+  disputeDeadline DateTime? @map("dispute_deadline") @db.Date
+
+  // terms
+  paymentTermsText  String? @map("payment_terms_text")
+  paymentTermsDays  Int?    @map("payment_terms_days")
+  disputeWindowDays Int?    @map("dispute_window_days")
+
+  // classification
+  category    InvoiceCategory?
+  /// One human-readable line.
+  description String?
+
+  // operation
+  airportIcao          String?  @map("airport_icao")
+  airportIata          String?  @map("airport_iata")
+  locationText         String?  @map("location_text")
+  aircraftRegistration String?  @map("aircraft_registration")
+  flightNumbers        String[] @default([]) @map("flight_numbers")
+
+  // amounts
+  currency          String?  @db.Char(3)
+  subtotalAmount    Decimal? @map("subtotal_amount") @db.Decimal(18, 4)
+  taxAmount         Decimal? @map("tax_amount") @db.Decimal(18, 4)
+  totalAmount       Decimal? @map("total_amount") @db.Decimal(18, 4)
+  amountDue         Decimal? @map("amount_due") @db.Decimal(18, 4)
+  amountDueCurrency String?  @map("amount_due_currency") @db.Char(3)
+
+  /// [{kind: item|fee|tax, description, quantity, uom, unit_price, amount}]
+  /// Decimals are strings: quantity/amount scale 4, unit_price scale 6.
+  lineItems   Json    @default("[]") @map("line_items")
+  /// {beneficiary, bank_name, iban, account_number, swift, routing_number, currency}
+  bankDetails Json?   @map("bank_details")
+  notes       String?
+  /// [{code, severity: error|warning|info, field, message}] — recomputed on every change.
+  flags       Json    @default("[]")
+
+  // workflow
+  approvedAt       DateTime?        @map("approved_at") @db.Timestamptz(3)
+  approvedById     String?          @map("approved_by_id") @db.Uuid
+  paidAt           DateTime?        @map("paid_at") @db.Date
+  paidById         String?          @map("paid_by_id") @db.Uuid
+  paymentReference String?          @map("payment_reference")
+  paymentNote      String?          @map("payment_note")
+  rejectedAt       DateTime?        @map("rejected_at") @db.Timestamptz(3)
+  rejectedById     String?          @map("rejected_by_id") @db.Uuid
+  rejectionReason  RejectionReason? @map("rejection_reason")
+  rejectionNote    String?          @map("rejection_note")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  inboundEmail InboundEmail   @relation(fields: [inboundEmailId], references: [id])
+  vendor       Vendor?        @relation(fields: [vendorId], references: [id])
+  approvedBy   User?          @relation("InvoiceApprovedBy", fields: [approvedById], references: [id])
+  paidBy       User?          @relation("InvoicePaidBy", fields: [paidById], references: [id])
+  rejectedBy   User?          @relation("InvoiceRejectedBy", fields: [rejectedById], references: [id])
+  events       InvoiceEvent[]
+
+  @@index([status])
+  @@index([dueDate])
+  @@index([vendorId])
+  @@index([vendorId, invoiceNumber])
+  @@index([fileSha256])
+  @@index([inboundEmailId])
+  @@map("invoices")
+}
+
+/// Append-only audit trail (UPDATE/DELETE blocked by a trigger in the migration).
+model InvoiceEvent {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId String           @map("invoice_id") @db.Uuid
+  /// Null = system.
+  userId    String?          @map("user_id") @db.Uuid
+  type      InvoiceEventType
+  /// For `edited`: {field: {from, to}}.
+  data      Json             @default("{}")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@index([invoiceId, createdAt])
+  @@map("invoice_events")
+}
