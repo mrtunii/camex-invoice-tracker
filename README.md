@@ -61,13 +61,17 @@ The normalized output of the last run is written to `fixtures/invoices/eval-out/
 
 ## Flags and vendors
 
-After every extraction the invoice is evaluated (`apps/api/src/evaluation/`): it is matched to a vendor (name or alias, else the sender's email domain), its due date and dispute deadline are derived, and the validation flags of SPEC §8 are computed. `GET /api/invoices/:id` returns `vendor`, `dueDateSource`, `disputeDeadline` and `flags`; the Inbox shows flag counts per invoice.
+After every extraction the invoice is evaluated (`apps/api/src/evaluation/`): it is matched to a vendor (name or alias, else the sender's email domain), its due date and dispute deadline are derived, and the validation flags of SPEC §8 are computed. `GET /api/invoices/:id` returns `vendor`, `dueDateSource`, `disputeDeadline` and `flags`; the lists show one flag icon per invoice (red for errors, amber for warnings) with the messages in its tooltip.
 
 Vendors are managed on `/vendors` (or `/api/vendors`). Creating or changing a vendor re-evaluates the invoices it can affect, so pending invoices link as soon as their vendor exists. Bank accounts are trusted from an invoice (`POST /api/invoices/:id/trust-bank-details`; the review UI comes in T06) and removed on `/vendors`. Every open invoice is re-evaluated daily at 00:05 Asia/Tbilisi, because some flags depend on the date. `OWN_EMAIL_DOMAINS` (default `camex.aero`) lists Camex's own mail domains: they never identify a vendor.
 
-## Invoices list
+## Home and the invoices list
 
-`/invoices` (also `/`) lists invoices by status tab (Needs review, which includes invoices still processing · Unpaid · Paid · Rejected · All) with counts, the unpaid totals per currency (never converted), overdue and due-in-7-days counts, filters (search over vendor, invoice #, registration and flight numbers; vendor; category; currency; invoice date range; has errors) and sortable columns. Tab, filters, sort and page are in the URL. **Export CSV** downloads the current tab, filters and sort (UTF-8 with BOM so Excel shows Georgian text; formula-like cells are prefixed with `'`; at most 10,000 rows). The API behind it: `GET /api/invoices`, `GET /api/invoices/summary` and `GET /api/invoices/export.csv`, with the query parameters of `packages/shared/src/invoice-list.ts` (unknown parameters are refused). Clicking a row opens `/invoices/:id` (an interim page with the PDF link until T06).
+The web app is built on [HeroUI v3](https://heroui.com) with one design system, the "dark cockpit" (SPEC §10): colour only where someone must act (red now, amber soon), green for paid, cyan-blue for actions and selection. Light, dark or system theme from the user menu.
+
+`/` (Home) says what needs attention in one sentence (invoices to review, a dispute window closing, overdue payments, unreadable PDFs), lists the first invoices to review and to pay, and shows what was spent: the month by currency (invoiced, paid, to pay, to review), the last 12 months, and the month's top categories and vendors. Its data comes from `GET /api/dashboard?month=YYYY-MM&currency=XXX`, every sum computed in SQL.
+
+`/invoices` lists invoices by status tab (To review, which includes invoices still being read · To pay · Paid · Rejected · All) with counts, filters (search over vendor, invoice #, registration and flight numbers; vendor; category; currency; invoice date range; errors only; on To pay: all, overdue or due this week), a line of totals per currency (never converted) and sortable columns. Tab, filters, sort and page are in the URL. **Export CSV** downloads the current tab, filters and sort (UTF-8 with BOM so Excel shows Georgian text; formula-like cells are prefixed with `'`; at most 10,000 rows). The API behind it: `GET /api/invoices`, `GET /api/invoices/summary` and `GET /api/invoices/export.csv`, with the query parameters of `packages/shared/src/invoice-list.ts` (unknown parameters are refused). Clicking a row opens `/invoices/:id` (an interim page with the PDF link until T06).
 
 ## Everyday commands
 
@@ -83,6 +87,7 @@ Vendors are managed on `/vendors` (or `/api/vendors`). Creating or changing a ve
 | `pnpm simulate:mailgun [flags]`                       | signed Mailgun webhook POSTs to the local API (`--help` for flags)                                 |
 | `pnpm eval:extraction [flags]`                        | extraction eval against the golden files (calls the Anthropic API; `--help`)                       |
 | `pnpm create-admin --email … --name … [--password …]` | create an admin from the command line (local development)                                          |
+| `pnpm seed:demo`                                      | fill an empty development database with demo invoices over 12 months (refuses in production)       |
 
 Background jobs (extraction, recovery sweep) run in the API process on pg-boss, in the `pgboss` schema of the same database. Set `WORKERS_ENABLED=false` to run an API process without workers.
 

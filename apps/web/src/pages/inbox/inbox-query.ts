@@ -9,7 +9,7 @@ import { api } from '@/lib/api';
 
 export const inboxQueryKey = ['inbox'] as const;
 
-/** While extraction runs, refresh every 5 s so chips move from Processing to Needs review. */
+/** While extraction runs, refresh every 5 s so "Reading…" turns into the result. */
 const PROCESSING_REFETCH_MS = 5000;
 
 function hasProcessing(emails: InboxEmail[]): boolean {

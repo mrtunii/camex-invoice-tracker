@@ -38,14 +38,17 @@ export type InvoiceSortKey = z.infer<typeof invoiceSortKeySchema>;
 export const sortOrderSchema = z.enum(['asc', 'desc']);
 export type SortOrder = z.infer<typeof sortOrderSchema>;
 
-/** `overdue`: unpaid, due before today. `soon`: unpaid, due today … today + 7 (summary links). */
+/** `overdue`: unpaid, due before today. `soon`: unpaid, due today … today + DUE_SOON_DAYS. */
 export const dueFilterSchema = z.enum(['overdue', 'soon']);
 export type DueFilter = z.infer<typeof dueFilterSchema>;
 
-/** Days ahead counted by `due=soon` and the summary's dueNext7Count. */
-export const DUE_NEXT_DAYS = 7;
-/** SPEC §6 "due soon" (dueState, and the dispute-deadline highlight): within 3 days. */
-export const DUE_SOON_DAYS = 3;
+/**
+ * SPEC §6 "due soon": due today … today + 7 days. One window everywhere: `dueState: soon`, the
+ * `due=soon` filter ("This week"), the summary's dueNext7Count and Home's due-this-week count.
+ */
+export const DUE_SOON_DAYS = 7;
+/** SPEC §8 DISPUTE_SOON: a dispute deadline within 3 days (passed included) needs attention. */
+export const DISPUTE_SOON_DAYS = 3;
 
 export const INVOICE_PAGE_SIZE = 50;
 export const MAX_INVOICE_PAGE_SIZE = 200;
@@ -73,10 +76,14 @@ export const DEFAULT_SORT_ORDER: Record<InvoiceSortKey, SortOrder> = {
   paidAt: 'desc',
 };
 
-/** A real calendar date: '2026-02-30' matches the pattern but is refused. */
+/** A real calendar date: '2026-02-30' and year 0000 (Postgres has no year 0) are refused. */
 export const validCalendarDateSchema = calendarDateSchema.refine((value) => {
   const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  return (
+    !value.startsWith('0000') &&
+    !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
 }, 'Not a valid date');
 
 /** Query strings carry text only; `hasErrors=false` is the same as leaving it out. */
@@ -136,7 +143,7 @@ export type InvoiceExportQuery = z.infer<typeof invoiceExportQuerySchema>;
 /** The filters of a list/summary/export query (no status, sort or pagination). */
 export type InvoiceFilters = InvoiceSummaryQuery;
 
-/** Unpaid and due before today, or due within the next DUE_SOON_DAYS days (SPEC §6). */
+/** Unpaid and due before today, or due today … today + DUE_SOON_DAYS (SPEC §6). */
 export const dueStateSchema = z.enum(['overdue', 'soon']);
 export type DueState = z.infer<typeof dueStateSchema>;
 
@@ -159,18 +166,30 @@ export const invoiceListItemSchema = z.object({
   category: invoiceCategorySchema.nullable(),
   airportIata: z.string().nullable(),
   locationText: z.string().nullable(),
-  flags: z.array(invoiceFlagSchema.pick({ code: true, severity: true })),
+  /** Without `field`; the list shows one icon whose tooltip lists the messages (T05b). */
+  flags: z.array(invoiceFlagSchema.pick({ code: true, severity: true, message: true })),
   paidAt: calendarDateSchema.nullable(),
   /** Only for `unpaid` invoices, against today in Asia/Tbilisi. */
   dueState: dueStateSchema.nullable(),
 });
 export type InvoiceListItem = z.infer<typeof invoiceListItemSchema>;
 
+/** An amount per currency, summed in SQL (never converted or added across currencies). */
+export const currencyTotalSchema = z.object({
+  currency: currencyCodeSchema,
+  amount: decimalStringSchema,
+});
+export type CurrencyTotal = z.infer<typeof currencyTotalSchema>;
+
 export const invoiceListResponseSchema = z.object({
   items: z.array(invoiceListItemSchema),
   total: z.number().int().nonnegative(),
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1),
+  /** amount_due per amount_due_currency over every row of the tab and filters (not just the page), sorted by currency. */
+  totals: z.array(currencyTotalSchema),
+  /** Rows of the tab and filters left out of `totals`: no amount due or no currency. */
+  withoutAmount: z.number().int().nonnegative(),
 });
 export type InvoiceListResponse = z.infer<typeof invoiceListResponseSchema>;
 
@@ -186,11 +205,11 @@ export const invoiceSummarySchema = z.object({
     all: countSchema,
   }),
   /** Unpaid amount_due summed per amount_due_currency (never converted), sorted by currency. */
-  unpaidTotals: z.array(z.object({ currency: currencyCodeSchema, amount: decimalStringSchema })),
+  unpaidTotals: z.array(currencyTotalSchema),
   /** Unpaid invoices left out of unpaidTotals: no amount due or no currency. */
   unpaidWithoutAmount: countSchema,
   overdueCount: countSchema,
-  /** Unpaid, due today … today + DUE_NEXT_DAYS. */
+  /** Unpaid, due today … today + DUE_SOON_DAYS (7). */
   dueNext7Count: countSchema,
 });
 export type InvoiceSummary = z.infer<typeof invoiceSummarySchema>;

@@ -35,7 +35,9 @@ type Seed = Omit<
     receivedAt?: Date;
     /** Share one email (and so one received_at) with other rows. */
     inboundEmailId?: string;
-    flags?: Pick<InvoiceFlag, 'code' | 'severity'>[];
+    /** Stored with `field` null and the code as message unless given. */
+    flags?: (Pick<InvoiceFlag, 'code' | 'severity'> &
+      Partial<Pick<InvoiceFlag, 'field' | 'message'>>)[];
   };
 
 const dateColumn = (value: string | null | undefined) =>
@@ -92,7 +94,12 @@ describe('invoices list, summary and CSV export', () => {
         fileSize: 1000,
         status: 'needs_review',
         extractionStatus: 'succeeded',
-        flags: (flags ?? []).map((flag) => ({ ...flag, field: null, message: flag.code })),
+        flags: (flags ?? []).map(({ code, severity, field, message }) => ({
+          code,
+          severity,
+          field: field ?? null,
+          message: message ?? code,
+        })),
         invoiceDate: dateColumn(invoiceDate),
         dueDate: dateColumn(dueDate),
         disputeDeadline: dateColumn(disputeDeadline),
@@ -161,6 +168,7 @@ describe('invoices list, summary and CSV export', () => {
         'currency=US',
         'currency=US1',
         'invoiceDateFrom=2026-02-30',
+        'invoiceDateFrom=0000-01-01',
         'invoiceDateTo=16.09.2026',
         'invoiceDateFrom=2026-10-02&invoiceDateTo=2026-10-01',
         'hasErrors=yes',
@@ -209,15 +217,31 @@ describe('invoices list, summary and CSV export', () => {
         airportIata: 'TBS',
         locationText: 'Tbilisi International Airport',
         flags: [
-          { code: 'NEW_VENDOR', severity: 'info' },
-          { code: 'TOTAL_MATH', severity: 'error' },
+          {
+            code: 'TOTAL_MATH',
+            severity: 'error',
+            field: 'totalAmount',
+            message: 'Line items add up to 34,074.55, not the total of 34,000.00',
+          },
+          {
+            code: 'NEW_VENDOR',
+            severity: 'info',
+            field: 'vendorName',
+            message: 'No vendor matched: link an existing vendor or create one',
+          },
         ],
         receivedAt: new Date('2026-09-28T07:15:00.000Z'),
       });
 
       const res = await get('/api/invoices?status=unpaid').expect(200);
       expect(invoiceListResponseSchema.strict().parse(res.body)).toEqual(res.body);
-      expect(res.body).toMatchObject({ total: 1, page: 1, pageSize: 50 });
+      expect(res.body).toMatchObject({
+        total: 1,
+        page: 1,
+        pageSize: 50,
+        totals: [{ currency: 'GEL', amount: '88753.98' }],
+        withoutAmount: 0,
+      });
       const [item] = res.body.items;
       expect(invoiceListItemSchema.strict().parse(item)).toEqual(item);
       expect(item).toEqual({
@@ -237,13 +261,21 @@ describe('invoices list, summary and CSV export', () => {
         category: 'fuel',
         airportIata: 'TBS',
         locationText: 'Tbilisi International Airport',
-        // Code and severity only: messages stay on the detail.
+        // Stored order (errors first), without `field`: the list's icon tooltip shows the messages.
         flags: [
-          { code: 'NEW_VENDOR', severity: 'info' },
-          { code: 'TOTAL_MATH', severity: 'error' },
+          {
+            code: 'TOTAL_MATH',
+            severity: 'error',
+            message: 'Line items add up to 34,074.55, not the total of 34,000.00',
+          },
+          {
+            code: 'NEW_VENDOR',
+            severity: 'info',
+            message: 'No vendor matched: link an existing vendor or create one',
+          },
         ],
         paidAt: null,
-        dueState: null, // due in 7 days: not soon (3 days)
+        dueState: 'soon', // due in 7 days: today … today + 7 is soon
       });
     });
 
@@ -405,8 +437,8 @@ describe('invoices list, summary and CSV export', () => {
         [ids.overdue]: 'overdue',
         [ids.today]: 'soon',
         [ids.in3]: 'soon',
-        [ids.in4]: null,
-        [ids.in7]: null,
+        [ids.in4]: 'soon',
+        [ids.in7]: 'soon', // the last day of the window
         [ids.in8]: null,
         [ids.noDue]: null,
         [ids.reviewPast]: null,
@@ -423,6 +455,17 @@ describe('invoices list, summary and CSV export', () => {
       // A day later the boundaries move with the clock.
       vi.restoreAllMocks();
       setToday(t, addDays(TODAY, 1));
+      const later = await get('/api/invoices?status=unpaid&pageSize=200').expect(200);
+      const laterStateOf = Object.fromEntries(
+        (later.body.items as { id: string; dueState: string | null }[]).map((i) => [
+          i.id,
+          i.dueState,
+        ]),
+      );
+      expect(laterStateOf).toMatchObject({
+        [ids.today]: 'overdue',
+        [ids.in8]: 'soon',
+      });
       expect(sorted(await listIds('status=unpaid&due=overdue'))).toEqual(
         sorted([ids.overdue, ids.today]),
       );
@@ -596,7 +639,126 @@ describe('invoices list, summary and CSV export', () => {
         expect([...paged].sort()).toEqual([...created].sort());
       }
       const beyond = await get('/api/invoices?status=unpaid&pageSize=5&page=6').expect(200);
-      expect(beyond.body).toEqual({ items: [], total: 23, page: 6, pageSize: 5 });
+      // No currency on these rows: nothing to sum.
+      expect(beyond.body).toEqual({
+        items: [],
+        total: 23,
+        page: 6,
+        pageSize: 5,
+        totals: [],
+        withoutAmount: 23,
+      });
+    });
+
+    it('totals and withoutAmount cover every row of the tab and filters, not just the page', async () => {
+      const due = (offset: number) => addDays(TODAY, offset);
+      const unpaid = (amountDue: string | null, amountDueCurrency: string | null, extra: Seed) =>
+        seed({ status: 'unpaid', amountDue, amountDueCurrency, category: 'fuel', ...extra });
+      await seed({ amountDue: '7', amountDueCurrency: 'USD', vendorName: 'Petrocas' });
+      await seed({ status: 'processing', extractionStatus: 'pending' });
+      await unpaid('0.1', 'USD', { dueDate: due(-1), vendorName: 'Petrocas' });
+      await unpaid('0.2', 'USD', { dueDate: due(3) });
+      await unpaid('88753.98', 'GEL', { dueDate: due(10), category: 'catering' });
+      await unpaid('0.02', 'GEL', { dueDate: due(-5), category: 'catering' });
+      await unpaid('-12.3456', 'EUR', {
+        dueDate: null,
+        flags: [{ code: 'TOTAL_MATH', severity: 'error' }],
+      });
+      await unpaid(null, 'USD', { dueDate: due(1) });
+      await unpaid('5', null, { dueDate: due(-2) });
+      await seed({ status: 'paid', amountDue: '100', amountDueCurrency: 'USD', paidAt: due(-1) });
+      await seed({ status: 'paid', amountDue: '0.0001', amountDueCurrency: 'USD', paidAt: due(0) });
+      await seed({ status: 'rejected', amountDue: '100', amountDueCurrency: 'USD' });
+
+      async function totals(query: string) {
+        const res = await get(`/api/invoices?${query}`).expect(200);
+        const { totals: sums, withoutAmount, total } = invoiceListResponseSchema.parse(res.body);
+        return { totals: sums, withoutAmount, total };
+      }
+
+      const unpaidTab = {
+        totals: [
+          { currency: 'EUR', amount: '-12.3456' },
+          { currency: 'GEL', amount: '88754' },
+          { currency: 'USD', amount: '0.3' }, // not 0.30000000000000004
+        ],
+        withoutAmount: 2,
+        total: 7,
+      };
+      // The same on every page, including one past the end.
+      for (const page of [1, 2, 4, 5]) {
+        expect(
+          await totals(`status=unpaid&pageSize=2&page=${String(page)}`),
+          `page ${String(page)}`,
+        ).toEqual(unpaidTab);
+      }
+      // The summary's unpaid totals are the same sums.
+      expect((await summary()).unpaidTotals).toEqual(unpaidTab.totals);
+
+      expect(await totals('status=needs_review&pageSize=1')).toEqual({
+        totals: [{ currency: 'USD', amount: '7' }],
+        withoutAmount: 1, // still processing
+        total: 2,
+      });
+      expect(await totals('status=paid&pageSize=1')).toEqual({
+        totals: [{ currency: 'USD', amount: '100.0001' }],
+        withoutAmount: 0,
+        total: 2,
+      });
+      expect(await totals('status=rejected')).toEqual({
+        totals: [{ currency: 'USD', amount: '100' }],
+        withoutAmount: 0,
+        total: 1,
+      });
+      expect(await totals('status=all&pageSize=3')).toEqual({
+        totals: [
+          { currency: 'EUR', amount: '-12.3456' },
+          { currency: 'GEL', amount: '88754' },
+          { currency: 'USD', amount: '207.3001' },
+        ],
+        withoutAmount: 3,
+        total: 12,
+      });
+
+      // Filters narrow the sums exactly like the rows.
+      expect(await totals('status=unpaid&category=catering')).toEqual({
+        totals: [{ currency: 'GEL', amount: '88754' }],
+        withoutAmount: 0,
+        total: 2,
+      });
+      expect(await totals('status=unpaid&currency=usd')).toEqual({
+        totals: [{ currency: 'USD', amount: '0.3' }],
+        withoutAmount: 1,
+        total: 3,
+      });
+      expect(await totals('status=unpaid&due=overdue')).toEqual({
+        totals: [
+          { currency: 'GEL', amount: '0.02' },
+          { currency: 'USD', amount: '0.1' },
+        ],
+        withoutAmount: 1,
+        total: 3,
+      });
+      expect(await totals('status=unpaid&due=soon')).toEqual({
+        totals: [{ currency: 'USD', amount: '0.2' }],
+        withoutAmount: 1,
+        total: 2,
+      });
+      expect(await totals('status=all&q=petro')).toEqual({
+        totals: [{ currency: 'USD', amount: '7.1' }],
+        withoutAmount: 0,
+        total: 2,
+      });
+      expect(await totals('status=all&hasErrors=true')).toEqual({
+        totals: [{ currency: 'EUR', amount: '-12.3456' }],
+        withoutAmount: 0,
+        total: 1,
+      });
+      expect(await totals('status=all&category=crew')).toEqual({
+        totals: [],
+        withoutAmount: 0,
+        total: 0,
+      });
     });
   });
 

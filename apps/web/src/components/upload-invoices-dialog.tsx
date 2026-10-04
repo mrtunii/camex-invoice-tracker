@@ -5,24 +5,12 @@ import {
   ingestResultSchema,
   uploadRejectedSchema,
 } from '@camex/shared';
+import { Alert, Button, Modal, cn, toast } from '@heroui/react';
 import { useMutation } from '@tanstack/react-query';
 import { FileText, Upload, X } from 'lucide-react';
-import { type DragEvent, type ReactNode, useId, useState } from 'react';
-import { toast } from 'sonner';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { type DragEvent, useId, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import { formatBytes } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { formatBytes, plural } from '@/lib/format';
 
 interface PickedFile {
   key: string;
@@ -42,14 +30,12 @@ async function pdfError(file: File): Promise<string | null> {
 
 /**
  * Manual upload of one or more invoice PDFs (POST /api/invoices/upload): drag & drop or pick,
- * per-file errors, all-or-nothing. Used on /inbox now and on the invoices list later.
+ * per-file errors, all-or-nothing. The page's one primary action on Home, Invoices and Inbox.
  */
 export function UploadInvoicesDialog({
   onUploaded,
-  trigger,
 }: {
   onUploaded?: (result: IngestResult) => void;
-  trigger?: ReactNode;
 }) {
   const inputId = useId();
   const [open, setOpen] = useState(false);
@@ -64,8 +50,9 @@ export function UploadInvoicesDialog({
       return api('/invoices/upload', ingestResultSchema, { method: 'POST', body });
     },
     onSuccess: (result) => {
-      const count = result.invoiceIds.length;
-      toast.success(`Uploaded ${count} invoice${count === 1 ? '' : 's'}. Extraction has started.`);
+      toast.success(
+        `Uploaded ${plural(result.invoiceIds.length, 'invoice', 'invoices')}. Reading them now.`,
+      );
       onUploaded?.(result);
       handleOpenChange(false);
     },
@@ -121,124 +108,126 @@ export function UploadInvoicesDialog({
   const canUpload = files.length > 0 && !tooMany && !hasErrors && !upload.isPending;
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button>
-            <Upload />
-            Upload PDFs
-          </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent
-        className="sm:max-w-lg"
-        // A file dropped next to the drop zone must not make the browser open it.
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Upload invoices</DialogTitle>
-          <DialogDescription>
-            One invoice per PDF, up to {MAX_UPLOAD_FILES} at a time. They go through the same
-            extraction and review as emailed invoices.
-          </DialogDescription>
-        </DialogHeader>
-
-        <label
-          htmlFor={inputId}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.stopPropagation();
-            onDrop(e);
-          }}
-          className={cn(
-            'flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-input px-4 py-8 text-center transition-colors hover:bg-muted/50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring',
-            dragging && 'border-ring bg-muted',
-          )}
-        >
-          <Upload className="size-6 text-muted-foreground" aria-hidden />
-          <span className="font-medium">Drop PDFs here or click to choose</span>
-          <span className="text-sm text-muted-foreground">PDF files only</span>
-          <input
-            id={inputId}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            className="sr-only"
-            onChange={(e) => {
-              void addFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
-        </label>
-
-        {files.length > 0 && (
-          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
-            {files.map(({ key, file, error }) => (
-              <li key={key} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <FileText
-                  className={cn(
-                    'size-4 shrink-0',
-                    error ? 'text-destructive' : 'text-muted-foreground',
-                  )}
-                  aria-hidden
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-[0.8125rem]" title={file.name}>
-                    {file.name}
-                  </p>
-                  <p
-                    className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')}
-                  >
-                    {error ?? formatBytes(file.size)}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Remove ${file.name}`}
-                  disabled={upload.isPending}
-                  onClick={() => {
-                    setFiles((current) => current.filter((f) => f.key !== key));
+    <>
+      <Button onPress={() => setOpen(true)}>
+        <Upload aria-hidden />
+        Upload PDFs
+      </Button>
+      <Modal.Backdrop isOpen={open} onOpenChange={handleOpenChange}>
+        <Modal.Container size="md">
+          <Modal.Dialog>
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading>Upload invoices</Modal.Heading>
+              <p className="text-muted">
+                One invoice per PDF, up to {MAX_UPLOAD_FILES} at a time. They are read and checked
+                like emailed invoices.
+              </p>
+            </Modal.Header>
+            <Modal.Body
+              className="flex flex-col gap-3 py-4"
+              // A file dropped next to the drop zone must not make the browser open it.
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+            >
+              <label
+                htmlFor={inputId}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setDragging(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => {
+                  e.stopPropagation();
+                  onDrop(e);
+                }}
+                className={cn(
+                  'flex cursor-pointer flex-col items-center gap-2 rounded-panel border border-dashed border-line px-4 py-8 text-center transition-colors hover:bg-surface-secondary has-[:focus-visible]:focus-ring',
+                  dragging && 'border-primary bg-primary/5',
+                )}
+              >
+                <Upload className="size-6 text-muted" aria-hidden />
+                <span className="font-medium">Drop PDFs here or click to choose</span>
+                <span className="text-xs text-muted">PDF files only</span>
+                <input
+                  id={inputId}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  multiple
+                  className="sr-only"
+                  onChange={(e) => {
+                    void addFiles(e.target.files);
+                    e.target.value = '';
                   }}
-                >
-                  <X />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+                />
+              </label>
 
-        {(formError ?? tooMany) && (
-          <Alert variant="destructive">
-            <AlertDescription>
-              {tooMany
-                ? `Choose at most ${MAX_UPLOAD_FILES} files (${files.length} selected).`
-                : formError}
-            </AlertDescription>
-          </Alert>
-        )}
+              {files.length > 0 && (
+                <ul className="max-h-64 divide-y divide-line overflow-y-auto rounded-panel border border-line">
+                  {files.map(({ key, file, error }) => (
+                    <li key={key} className="flex items-center gap-3 px-3 py-2">
+                      <FileText
+                        className={cn('size-4 shrink-0', error ? 'text-danger' : 'text-muted')}
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate" title={file.name}>
+                          {file.name}
+                        </p>
+                        <p className={cn('text-xs', error ? 'text-danger' : 'text-muted')}>
+                          {error ?? formatBytes(file.size)}
+                        </p>
+                      </div>
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Remove ${file.name}`}
+                        isDisabled={upload.isPending}
+                        onPress={() => setFiles((current) => current.filter((f) => f.key !== key))}
+                      >
+                        <X aria-hidden />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" disabled={!canUpload} onClick={() => upload.mutate(files)}>
-            {upload.isPending
-              ? 'Uploading…'
-              : `Upload ${files.length > 0 ? String(files.length) : ''} ${files.length === 1 ? 'file' : 'files'}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+              {(formError ?? tooMany) && (
+                <Alert status="danger">
+                  <Alert.Content>
+                    <Alert.Description>
+                      {tooMany
+                        ? `Choose at most ${MAX_UPLOAD_FILES} files (${files.length} selected).`
+                        : formError}
+                    </Alert.Description>
+                  </Alert.Content>
+                </Alert>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="ghost" onPress={() => handleOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                isDisabled={!canUpload}
+                isPending={upload.isPending}
+                onPress={() => upload.mutate(files)}
+              >
+                {upload.isPending
+                  ? 'Uploading…'
+                  : files.length > 0
+                    ? `Upload ${plural(files.length, 'file', 'files')}`
+                    : 'Upload'}
+              </Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </>
   );
 }

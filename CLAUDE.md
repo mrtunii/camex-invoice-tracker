@@ -2,7 +2,7 @@
 
 Internal tool for Camex Airlines finance: vendor invoice PDFs arrive by email, an LLM extracts them, a human checks each against the original, then it is tracked unpaid → paid. **docs/SPEC.md is the source of truth.** Implement only the current task (SPEC §13). If the spec looks wrong or ambiguous, pick the simplest option and record it in the report; never silently redesign.
 
-Layout: pnpm workspaces. `apps/api` NestJS 12 (ESM) + Prisma 7 · `apps/web` React + Vite + shadcn/ui · `packages/shared` zod schemas and types used by both. Run `pnpm dev` (API :3180, web :5180), `pnpm test` (needs `docker compose up -d --wait`), `pnpm lint`, `pnpm typecheck`, `pnpm simulate:mailgun`, `pnpm eval:extraction` (calls the Anthropic API, costs money; not part of `pnpm test`); new migration: `pnpm db:migrate:dev --name <name>`. Sample invoices: `fixtures/invoices/` (don't modify).
+Layout: pnpm workspaces. `apps/api` NestJS 12 (ESM) + Prisma 7 · `apps/web` React + Vite + HeroUI v3 (design rules: SPEC §10) · `packages/shared` zod schemas and types used by both. Run `pnpm dev` (API :3180, web :5180), `pnpm test` (needs `docker compose up -d --wait`), `pnpm lint`, `pnpm typecheck`, `pnpm simulate:mailgun`, `pnpm seed:demo` (demo data for an empty dev database), `pnpm eval:extraction` (calls the Anthropic API, costs money; not part of `pnpm test`); new migration: `pnpm db:migrate:dev --name <name>`. Sample invoices: `fixtures/invoices/` (don't modify).
 
 Conventions:
 

@@ -1,9 +1,10 @@
-import { X } from 'lucide-react';
-import { type KeyboardEvent, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { Description, ErrorMessage, Label, Tag, TagGroup, cn } from '@heroui/react';
+import { type KeyboardEvent, useId, useState } from 'react';
 
 interface TagInputProps {
-  id: string;
+  label: string;
+  /** Accessible name of the text box, e.g. "Add an alias". */
+  addLabel: string;
   value: string[];
   onChange: (next: string[]) => void;
   /** Called with a message when typed text is refused, and with null once it is fine again. */
@@ -14,18 +15,19 @@ interface TagInputProps {
   /** Characters that also add the typed value (Enter always does). */
   separators?: string[];
   placeholder?: string;
-  invalid?: boolean;
-  mono?: boolean;
-  'aria-describedby'?: string;
+  description?: string;
+  /** The message to show (a refused value or a server error), or null. */
+  error: string | null;
 }
 
 /**
- * A list of short values edited as chips: type and press Enter (or a separator) to add, ×
- * or Backspace on an empty input to remove. Typed text is also added on blur, so a value isn't
- * lost when the user goes straight to Save.
+ * A list of short values edited as removable tags (the one place the UI shows chips): type and
+ * press Enter (or a separator) to add, the tag's × or Backspace on an empty box to remove. Typed
+ * text is also added on blur, so a value isn't lost when the user goes straight to Save.
  */
 export function TagInput({
-  id,
+  label,
+  addLabel,
   value,
   onChange,
   onError,
@@ -33,25 +35,24 @@ export function TagInput({
   normalize = (raw) => raw.trim(),
   separators = [],
   placeholder,
-  invalid,
-  mono,
-  ...aria
+  description,
+  error,
 }: TagInputProps) {
+  const inputId = useId();
   const [text, setText] = useState('');
 
-  /** Adds the typed text; returns false (and keeps it) when it is refused. */
-  function commit(raw: string): boolean {
+  /** Adds the typed text; keeps it (and reports why) when it is refused. */
+  function commit(raw: string) {
     const next = normalize(raw);
     if (next === '') {
       setText('');
-      return true;
+      return;
     }
-    const error = validate?.(next, value) ?? null;
-    onError(error);
-    if (error !== null) return false;
+    const refused = validate?.(next, value) ?? null;
+    onError(refused);
+    if (refused !== null) return;
     if (!value.includes(next)) onChange([...value, next]);
     setText('');
-    return true;
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -64,48 +65,44 @@ export function TagInput({
   }
 
   return (
-    <div
-      className={cn(
-        'flex min-h-8 w-full flex-wrap items-center gap-1 rounded-lg border border-input px-1.5 py-1 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
-        invalid && 'border-destructive ring-3 ring-destructive/20',
-      )}
+    <TagGroup
+      size="sm"
+      onRemove={(keys) => onChange(value.filter((tag) => !keys.has(tag)))}
+      className="flex flex-col gap-1.5"
     >
-      {value.map((tag) => (
-        <span
-          key={tag}
-          className={cn(
-            'inline-flex max-w-full items-center gap-0.5 rounded-md bg-secondary py-0.5 pr-0.5 pl-2 text-xs text-secondary-foreground',
-            mono && 'font-mono',
-          )}
-        >
-          <span className="truncate">{tag}</span>
-          <button
-            type="button"
-            onClick={() => onChange(value.filter((t) => t !== tag))}
-            className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            aria-label={`Remove ${tag}`}
-          >
-            <X className="size-3" aria-hidden />
-          </button>
-        </span>
-      ))}
-      <input
-        id={id}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          if (invalid) onError(null);
-        }}
-        onKeyDown={onKeyDown}
-        onBlur={() => commit(text)}
-        placeholder={value.length === 0 ? placeholder : undefined}
-        aria-invalid={invalid}
+      <Label>{label}</Label>
+      <div
         className={cn(
-          'h-6 min-w-32 flex-1 bg-transparent px-1 text-base outline-none placeholder:text-muted-foreground md:text-sm',
-          mono && 'font-mono',
+          'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-field border border-field-border bg-field px-1.5 py-1 transition-colors focus-within:border-field-border-focus',
+          error !== null && 'border-danger',
         )}
-        {...aria}
-      />
-    </div>
+      >
+        {value.length > 0 && (
+          <TagGroup.List className="contents">
+            {value.map((tag) => (
+              <Tag key={tag} id={tag} textValue={tag}>
+                {tag}
+              </Tag>
+            ))}
+          </TagGroup.List>
+        )}
+        <input
+          id={inputId}
+          value={text}
+          aria-label={addLabel}
+          aria-invalid={error !== null}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (error !== null) onError(null);
+          }}
+          onKeyDown={onKeyDown}
+          onBlur={() => commit(text)}
+          placeholder={value.length === 0 ? placeholder : undefined}
+          className="h-7 min-w-32 flex-1 bg-transparent px-1.5 text-sm text-field-foreground outline-none placeholder:text-field-placeholder"
+        />
+      </div>
+      {description !== undefined && <Description>{description}</Description>}
+      <ErrorMessage>{error}</ErrorMessage>
+    </TagGroup>
   );
 }

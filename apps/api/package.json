@@ -20,7 +20,8 @@
     "db:migrate:dev": "prisma migrate dev",
     "create-admin": "tsx src/cli/create-admin.ts",
     "simulate:mailgun": "tsx src/cli/simulate-mailgun.ts",
-    "eval:extraction": "tsx src/cli/eval-extraction.ts"
+    "eval:extraction": "tsx src/cli/eval-extraction.ts",
+    "seed:demo": "tsx src/cli/seed-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

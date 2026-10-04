@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Camex Invoice Tracker</title>
+    <title>Camex Invoices</title>
+    <!-- The stored theme (Light / Dark / System, see src/lib/theme.tsx) before the first paint. -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('heroui-theme') || 'system';
+          if (theme === 'system') {
+            theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.classList.add(theme);
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {}
+      })();
+    </script>
     <!-- Runtime config (window.__APP_CONFIG__), generated per environment; must run before the bundle. -->
     <script src="/config.js"></script>
   </head>

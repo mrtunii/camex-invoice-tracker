@@ -95,6 +95,39 @@ describe('inbox and invoice files', () => {
     await t.http().get('/api/inbox?cursor=nope').set('Cookie', cookie).expect(400);
   });
 
+  it("lists each invoice's flags with their messages, without `field`", async () => {
+    const res = await postMailgun(t, { attachments: [asmPdf] }).expect(200);
+    const invoiceId = res.body.invoiceIds[0] as string;
+    const flags = [
+      {
+        code: 'MISSING_REQUIRED',
+        severity: 'error',
+        field: 'dueDate',
+        message: 'Due date is missing',
+      },
+      {
+        code: 'NEW_VENDOR',
+        severity: 'info',
+        field: 'vendorName',
+        message: 'No vendor matched: link an existing vendor or create one',
+      },
+    ];
+    await t.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'needs_review', extractionStatus: 'succeeded', flags },
+    });
+
+    const list = await t.http().get('/api/inbox').set('Cookie', cookie).expect(200);
+    const detail = await t
+      .http()
+      .get(`/api/inbox/${res.body.inboundEmailId as string}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    const expected = flags.map(({ code, severity, message }) => ({ code, severity, message }));
+    expect(list.body.items[0].invoices[0].flags).toEqual(expected);
+    expect(detail.body.invoices[0].flags).toEqual(expected);
+  });
+
   it('returns one email with its body and headers', async () => {
     const headers = [
       ['From', 'Vendor <billing@vendor.example>'],

@@ -16,3 +16,6 @@ fixtures/invoices/eval-out/
 
 # local tool state
 .remember/
+
+# visual QA screenshots for the CTO (T05b §7), not committed
+.review/

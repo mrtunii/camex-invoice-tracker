@@ -1,21 +1,21 @@
 import {
   DEFAULT_SORT_ORDER,
+  type DueFilter,
+  type InvoiceListResponse,
   type InvoiceListStatus,
   type InvoiceSortKey,
   type InvoiceSummary,
   businessToday,
 } from '@camex/shared';
+import { Button, Link, Pagination, Tabs, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { type ReactNode, useCallback, useMemo } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/page-header';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import { UploadInvoicesDialog } from '@/components/upload-invoices-dialog';
 import { appConfig } from '@/lib/config';
-import { formatAmount } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { formatAmount, formatCount, plural } from '@/lib/format';
 import { InboxAddress } from '@/pages/inbox/inbox-address';
 import { inboxQueryKey } from '@/pages/inbox/inbox-query';
 import { InvoiceFilters, type SetFilters } from './invoice-filters';
@@ -29,131 +29,166 @@ import {
   useInvoiceSummary,
 } from './invoices-query';
 import {
-  type ListParams,
   NO_FILTERS,
   effectiveSort,
   hasActiveFilters,
   readListParams,
   writeListParams,
 } from './list-params';
-import { Pagination } from './pagination';
 
 const TABS: { status: InvoiceListStatus; label: string }[] = [
-  { status: 'needs_review', label: 'Needs review' },
-  { status: 'unpaid', label: 'Unpaid' },
+  { status: 'needs_review', label: 'To review' },
+  { status: 'unpaid', label: 'To pay' },
   { status: 'paid', label: 'Paid' },
   { status: 'rejected', label: 'Rejected' },
   { status: 'all', label: 'All' },
 ];
 
-const EMPTY_TEXT: Record<InvoiceListStatus, string> = {
-  needs_review: 'Nothing to review. New invoices appear here once they are extracted.',
-  unpaid: 'No unpaid invoices. Approved invoices wait here until they are paid.',
-  paid: 'No paid invoices yet.',
-  rejected: 'No rejected invoices.',
-  all: 'No invoices yet. Emailed and uploaded invoices appear here.',
-};
-
-/** `?…` for a link to the list with `patch` applied (and back to page 1 unless given). */
-function hrefWith(params: ListParams, patch: Partial<ListParams>): string {
-  const query = writeListParams({ ...params, page: 1, ...patch }).toString();
-  return query === '' ? '/invoices' : `/invoices?${query}`;
+/** Empty states say what to do next. */
+function emptyText(status: InvoiceListStatus, inbox: ReactNode): ReactNode {
+  switch (status) {
+    case 'needs_review':
+      return inbox === null ? (
+        'Nothing to review. Emailed and uploaded invoices appear here once they are read.'
+      ) : (
+        <>Nothing to review. New invoices sent to {inbox} appear here.</>
+      );
+    case 'unpaid':
+      return 'Nothing to pay. Invoices you approve wait here until they are paid.';
+    case 'paid':
+      return 'Nothing paid yet. Invoices you mark as paid appear here.';
+    case 'rejected':
+      return 'Nothing rejected.';
+    case 'all':
+      return inbox === null ? (
+        'No invoices yet. Upload PDFs to start.'
+      ) : (
+        <>No invoices yet. Upload PDFs, or have vendors send them to {inbox}.</>
+      );
+  }
 }
 
-function StatusTabs({
-  params,
-  counts,
+/** 1 … 4 5 [6] 7 8 … 20: the first, the last and two either side of the current page. */
+function pageNumbers(page: number, pages: number): (number | 'gap')[] {
+  const shown = new Set([1, pages, page - 2, page - 1, page, page + 1, page + 2]);
+  const sorted = [...shown].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  return sorted.flatMap((n, i) => {
+    const previous = sorted[i - 1];
+    return previous !== undefined && n - previous > 1 ? ['gap' as const, n] : [n];
+  });
+}
+
+function ListPagination({
+  page,
+  data,
+  onPage,
 }: {
-  params: ListParams;
-  counts: InvoiceSummary['counts'] | undefined;
+  page: number;
+  data: InvoiceListResponse;
+  onPage: (page: number) => void;
 }) {
+  const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
+  if (pages <= 1) return null;
+  const from = Math.min(data.total, (page - 1) * data.pageSize + 1);
+  const to = Math.min(data.total, page * data.pageSize);
   return (
-    <nav
-      aria-label="Invoice status"
-      className="-mb-px flex gap-1 overflow-x-auto border-b border-border"
-    >
-      {TABS.map(({ status, label }) => {
-        const current = params.status === status;
-        return (
-          <Link
-            key={status}
-            to={hrefWith(params, { status, sort: null, order: null })}
-            aria-current={current ? 'page' : undefined}
-            className={cn(
-              'inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-              current && 'border-primary font-medium text-foreground',
-            )}
+    <Pagination size="sm" className="flex flex-wrap items-center justify-between gap-3">
+      <Pagination.Summary className="tabular text-muted">
+        {formatCount(from)}–{formatCount(to)} of {formatCount(data.total)}
+      </Pagination.Summary>
+      <Pagination.Content>
+        <Pagination.Item>
+          <Pagination.Previous
+            isDisabled={page <= 1}
+            onPress={() => onPage(page - 1)}
+            aria-label="Previous page"
           >
-            {label}
-            <span
-              className={cn(
-                'min-w-6 rounded-full bg-muted px-1.5 py-0.5 text-center text-xs tabular-nums',
-                current && 'bg-primary text-primary-foreground',
-                status === 'needs_review' &&
-                  !current &&
-                  (counts?.needs_review ?? 0) > 0 &&
-                  'bg-attention/25 text-foreground',
-              )}
-            >
-              {counts ? counts[status].toLocaleString('en-US') : '·'}
-            </span>
-          </Link>
-        );
-      })}
-    </nav>
+            <Pagination.PreviousIcon />
+          </Pagination.Previous>
+        </Pagination.Item>
+        {pageNumbers(page, pages).map((n, i) =>
+          n === 'gap' ? (
+            <Pagination.Item key={`gap-${String(i)}`}>
+              <Pagination.Ellipsis />
+            </Pagination.Item>
+          ) : (
+            <Pagination.Item key={n}>
+              <Pagination.Link
+                isActive={n === page}
+                aria-current={n === page ? 'page' : undefined}
+                aria-label={`Page ${String(n)}`}
+                onPress={() => onPage(n)}
+                className="tabular"
+              >
+                {n}
+              </Pagination.Link>
+            </Pagination.Item>
+          ),
+        )}
+        <Pagination.Item>
+          <Pagination.Next
+            isDisabled={page >= pages}
+            onPress={() => onPage(page + 1)}
+            aria-label="Next page"
+          >
+            <Pagination.NextIcon />
+          </Pagination.Next>
+        </Pagination.Item>
+      </Pagination.Content>
+    </Pagination>
   );
 }
 
-function SummaryStrip({ params, summary }: { params: ListParams; summary: InvoiceSummary }) {
-  const { unpaidTotals, unpaidWithoutAmount, overdueCount, dueNext7Count } = summary;
-  const link =
-    'rounded underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none';
+/** One quiet line: "8 invoices · 35,153.08 USD · 88,753.98 GEL" for the tab and filters. */
+function TotalsLine({ data }: { data: InvoiceListResponse }) {
+  const parts = [
+    plural(data.total, 'invoice', 'invoices'),
+    // One total per currency, never converted or added together.
+    ...data.totals.map(({ currency, amount }) => formatAmount(amount, currency)),
+    ...(data.withoutAmount > 0 ? [`${formatCount(data.withoutAmount)} without amount`] : []),
+  ];
+  return <p className="tabular text-muted">{parts.join(' · ')}</p>;
+}
+
+const DUE_CHOICES: { id: DueFilter | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'soon', label: 'This week' },
+];
+
+/** To pay: All · Overdue · This week (the `due` filter: before today / today … +7 days). */
+function DueControl({ due, onChange }: { due: DueFilter | null; onChange: SetFilters }) {
   return (
-    <section
-      aria-label="Unpaid summary"
-      className="flex flex-wrap items-baseline gap-x-6 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm"
+    <ToggleButtonGroup
+      aria-label="When due"
+      size="sm"
+      selectionMode="single"
+      disallowEmptySelection
+      selectedKeys={new Set([due ?? 'all'])}
+      onSelectionChange={(keys) => {
+        const [key] = [...keys];
+        onChange({ due: key === 'overdue' || key === 'soon' ? key : null });
+      }}
     >
-      <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-muted-foreground">Unpaid</span>
-        {unpaidTotals.length === 0 ? (
-          <span className="text-muted-foreground">nothing</span>
-        ) : (
-          // One total per currency, never converted or added together.
-          unpaidTotals.map(({ currency, amount }, i) => (
-            <span key={currency} className="font-semibold tabular-nums">
-              {i > 0 && (
-                <span className="mr-2 font-normal text-muted-foreground" aria-hidden>
-                  ·
-                </span>
-              )}
-              {formatAmount(amount, currency)}
-            </span>
-          ))
-        )}
-        {unpaidWithoutAmount > 0 && (
-          <span className="text-muted-foreground">
-            + {unpaidWithoutAmount.toLocaleString('en-US')} without amount
-          </span>
-        )}
-      </p>
-      <p className="flex gap-x-4">
-        <Link
-          to={hrefWith(params, { status: 'unpaid', due: 'overdue', sort: null, order: null })}
-          className={cn(
-            link,
-            overdueCount > 0 ? 'font-medium text-destructive' : 'text-muted-foreground',
-          )}
-        >
-          {overdueCount.toLocaleString('en-US')} overdue
-        </Link>
-        <Link
-          to={hrefWith(params, { status: 'unpaid', due: 'soon', sort: null, order: null })}
-          className={cn(link, dueNext7Count > 0 ? 'font-medium' : 'text-muted-foreground')}
-        >
-          {dueNext7Count.toLocaleString('en-US')} due in 7 days
-        </Link>
-      </p>
-    </section>
+      {DUE_CHOICES.map(({ id, label }, i) => (
+        <ToggleButton key={id} id={id}>
+          {i > 0 && <ToggleButtonGroup.Separator />}
+          {label}
+        </ToggleButton>
+      ))}
+    </ToggleButtonGroup>
+  );
+}
+
+function TabLabel({ label, count }: { label: string; count: number | undefined }) {
+  return (
+    <span className="flex items-baseline gap-1.5">
+      {label}
+      {/* The count is plain muted text, never a pill. */}
+      <span className="tabular font-normal text-muted">
+        {count === undefined ? '' : formatCount(count)}
+      </span>
+    </span>
   );
 }
 
@@ -183,105 +218,144 @@ export function InvoicesPage() {
     [setSearch],
   );
 
+  const setStatus = (status: InvoiceListStatus) => {
+    // Tabs keep the filters and reset sort and page; "when due" only means something to pay.
+    setSearch(
+      writeListParams({
+        ...params,
+        status,
+        sort: null,
+        order: null,
+        page: 1,
+        due: status === 'unpaid' ? params.due : null,
+      }),
+    );
+  };
+
   const onSort = (key: InvoiceSortKey) => {
     const order =
       sort.sort === key ? (sort.order === 'asc' ? 'desc' : 'asc') : DEFAULT_SORT_ORDER[key];
     setSearch(writeListParams({ ...params, sort: key, order, page: 1 }));
   };
 
-  const filtered = hasActiveFilters(params);
+  const counts: InvoiceSummary['counts'] | undefined = summary.data?.counts;
   const data = list.data;
   const pastEnd = data !== undefined && data.items.length === 0 && data.total > 0;
   const { inboxAddress } = appConfig;
+  const inbox = inboxAddress === null ? null : <InboxAddress address={inboxAddress} bare />;
 
   const empty = pastEnd ? (
     <p>
       Page {params.page} is past the end.{' '}
-      <Link to={hrefWith(params, {})} className="text-foreground underline underline-offset-4">
+      <Link
+        onPress={() => setSearch(writeListParams({ ...params, page: 1 }))}
+        className="text-primary"
+      >
         Go to page 1
       </Link>
     </p>
-  ) : filtered ? (
+  ) : hasActiveFilters(params) ? (
     <>
       <p>No invoices match these filters.</p>
-      <Button variant="outline" className="mt-3" onClick={() => setFilters(NO_FILTERS)}>
+      <Button variant="outline" className="mx-auto mt-3" onPress={() => setFilters(NO_FILTERS)}>
         Clear filters
       </Button>
     </>
   ) : (
-    <>
-      <p>{EMPTY_TEXT[params.status]}</p>
-      {inboxAddress !== null && (params.status === 'needs_review' || params.status === 'all') && (
-        <p className="mt-2">
-          <InboxAddress address={inboxAddress} />
-        </p>
-      )}
-    </>
+    <p>{emptyText(params.status, inbox)}</p>
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
         title="Invoices"
-        actions={
-          <>
+        action={
+          <UploadInvoicesDialog
+            onUploaded={() => {
+              void queryClient.invalidateQueries({ queryKey: invoicesQueryKey });
+              void queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+            }}
+          />
+        }
+      />
+
+      <Tabs
+        variant="secondary"
+        selectedKey={params.status}
+        onSelectionChange={(key) => {
+          const tab = TABS.find((t) => t.status === key);
+          if (tab && tab.status !== params.status) setStatus(tab.status);
+        }}
+      >
+        <Tabs.ListContainer className="overflow-x-auto">
+          <Tabs.List aria-label="Invoice status" className="min-w-0">
+            {TABS.map(({ status, label }) => (
+              <Tabs.Tab key={status} id={status} className="w-auto px-3">
+                <TabLabel label={label} count={counts?.[status]} />
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
+        </Tabs.ListContainer>
+
+        <Tabs.Panel id={params.status} className="space-y-4 px-0 pt-5 pb-0">
+          <InvoiceFilters filters={params} onChange={setFilters} />
+
+          {(params.status === 'unpaid' || params.due !== null) && (
+            <DueControl due={params.due} onChange={setFilters} />
+          )}
+
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            {data ? <TotalsLine data={data} /> : <span />}
             <Button
-              variant="outline"
-              onClick={() => exportCsv.mutate(params)}
-              disabled={exportCsv.isPending}
-              title="Download the invoices in this tab, with the current filters and sort, as CSV"
+              size="sm"
+              variant="ghost"
+              onPress={() => exportCsv.mutate(params)}
+              isPending={exportCsv.isPending}
+              aria-label="Export these invoices as CSV"
             >
               <Download aria-hidden />
               {exportCsv.isPending ? 'Exporting…' : 'Export CSV'}
             </Button>
-            <UploadInvoicesDialog
-              onUploaded={() => {
-                void queryClient.invalidateQueries({ queryKey: invoicesQueryKey });
-                void queryClient.invalidateQueries({ queryKey: inboxQueryKey });
-              }}
-            />
-          </>
-        }
-      />
+          </div>
 
-      <div className="space-y-4">
-        <StatusTabs params={params} counts={summary.data?.counts} />
-        {summary.data && <SummaryStrip params={params} summary={summary.data} />}
-        <InvoiceFilters filters={params} onChange={setFilters} />
-      </div>
-
-      {list.isError ? (
-        <Alert variant="destructive">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>Couldn't load invoices: {list.error.message}</span>
-            <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-              Try again
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <>
-          <InvoicesTable
-            status={params.status}
-            items={data?.items ?? []}
-            sort={sort}
-            onSort={onSort}
-            onOpen={(id) => void navigate(`/invoices/${id}`, { state: { from: location.search } })}
-            today={today}
-            loading={list.isPending}
-            stale={list.isPlaceholderData}
-            empty={empty}
-          />
-          {data && (
-            <Pagination
-              page={params.page}
-              pageSize={data.pageSize}
-              total={data.total}
-              hrefFor={(page) => hrefWith(params, { page })}
-            />
+          {list.isError ? (
+            <div className="rounded-panel border border-line bg-surface px-6 py-10 text-center">
+              <p>Couldn’t load invoices: {list.error.message}</p>
+              <Button
+                variant="outline"
+                className="mx-auto mt-3"
+                onPress={() => void list.refetch()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : (
+            <>
+              <InvoicesTable
+                status={params.status}
+                items={data?.items ?? []}
+                sort={sort}
+                onSort={onSort}
+                onOpen={(id) =>
+                  void navigate(`/invoices/${id}`, { state: { from: location.search } })
+                }
+                today={today}
+                loading={list.isPending}
+                stale={list.isPlaceholderData}
+                empty={empty}
+              />
+              {data && (
+                <ListPagination
+                  page={params.page}
+                  data={data}
+                  onPage={(page) => setSearch(writeListParams({ ...params, page }))}
+                />
+              )}
+            </>
           )}
-        </>
-      )}
+        </Tabs.Panel>
+      </Tabs>
     </div>
   );
 }

@@ -19,8 +19,8 @@ export const inboxInvoiceSchema = z.object({
   status: invoiceStatusSchema,
   extractionStatus: extractionStatusSchema,
   fileName: z.string(),
-  /** Codes and severities only, for the counts on the Inbox chip. */
-  flags: z.array(invoiceFlagSchema.pick({ code: true, severity: true })),
+  /** Without `field`; the Inbox shows one icon whose tooltip lists the messages (T05b). */
+  flags: z.array(invoiceFlagSchema.pick({ code: true, severity: true, message: true })),
 });
 export type InboxInvoice = z.infer<typeof inboxInvoiceSchema>;
 

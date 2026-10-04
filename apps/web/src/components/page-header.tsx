@@ -1,25 +1,24 @@
-import { type ReactNode, useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { useDocumentTitle } from '@/lib/document-title';
 
+/** The page title (20 px) and at most one primary action on the right. */
 export function PageHeader({
   title,
   description,
-  actions,
+  action,
 }: {
   title: string;
   description?: ReactNode;
-  actions?: ReactNode;
+  action?: ReactNode;
 }) {
-  useEffect(() => {
-    document.title = `${title} – Camex Invoice Tracker`;
-  }, [title]);
-
+  useDocumentTitle(title);
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="max-w-prose text-muted-foreground">{description}</p>}
+    <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+      <div className="min-w-0 space-y-1">
+        <h1 className="text-xl font-semibold">{title}</h1>
+        {description !== undefined && <p className="max-w-prose text-muted">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {action !== undefined && <div className="flex shrink-0 items-center gap-2">{action}</div>}
     </header>
   );
 }

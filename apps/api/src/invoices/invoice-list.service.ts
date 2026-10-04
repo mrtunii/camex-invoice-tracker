@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import {
   type Clock,
-  DUE_NEXT_DAYS,
+  type CurrencyTotal,
   DUE_SOON_DAYS,
   type DueState,
   type InvoiceExportQuery,
@@ -15,19 +15,18 @@ import {
   addDays,
   businessToday,
   dateUrgency,
-  invoiceFlagSchema,
 } from '@camex/shared';
-import { z } from 'zod';
 import { CLOCK } from '../clock/clock.module.js';
 import type { Env } from '../config/env.js';
 import { ENV } from '../config/env.module.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { type CsvCell, csvDocument } from './invoice-csv.js';
-import { fromDateColumn, fromDecimalColumn } from './invoice-columns.js';
+import { flagSummariesFromJson, fromDateColumn, fromDecimalColumn } from './invoice-columns.js';
 import {
   INVOICE_FROM,
   filterConditions,
+  inIdOrder,
   orderByClause,
   resolveSort,
   statusCondition,
@@ -69,8 +68,6 @@ const exportSelect = {
 type ListRow = Prisma.InvoiceGetPayload<{ select: typeof listSelect }>;
 type ExportRow = Prisma.InvoiceGetPayload<{ select: typeof exportSelect }>;
 
-const storedFlagsSchema = z.array(invoiceFlagSchema.pick({ code: true, severity: true }));
-
 const CSV_COLUMNS = [
   'id',
   'status',
@@ -103,15 +100,6 @@ function dueStateOf(status: InvoiceStatus, dueDate: string | null, today: string
   return urgency === 'passed' ? 'overdue' : urgency;
 }
 
-/** `rows` in the order of `ids` (a row deleted in between is skipped). */
-function inIdOrder<T extends { id: string }>(ids: readonly string[], rows: readonly T[]): T[] {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return ids.flatMap((id) => {
-    const row = byId.get(id);
-    return row === undefined ? [] : [row];
-  });
-}
-
 interface SummaryCounts {
   needs_review: number;
   unpaid: number;
@@ -133,12 +121,15 @@ export class InvoiceListService {
 
   async list(query: InvoiceListQuery): Promise<InvoiceListResponse> {
     const today = businessToday(this.clock);
-    const where = whereClause([statusCondition(query.status), ...filterConditions(query, today)]);
+    const conditions = [statusCondition(query.status), ...filterConditions(query, today)];
+    const where = whereClause(conditions);
     const orderBy = orderByClause(resolveSort(query.status, query));
     const offset = (query.page - 1) * query.pageSize;
 
-    const [total, ids] = await Promise.all([
-      this.count(where),
+    const [counts, totals, ids] = await Promise.all([
+      this.counts(where),
+      // Over every row of the tab and filters, not just this page.
+      this.totalsByCurrency(conditions),
       this.orderedIds(where, orderBy, query.pageSize, offset),
     ]);
     const rows = await this.prisma.invoice.findMany({
@@ -147,18 +138,20 @@ export class InvoiceListService {
     });
     return {
       items: inIdOrder(ids, rows).map((row) => this.toListItem(row, today)),
-      total,
+      total: counts.total,
       page: query.page,
       pageSize: query.pageSize,
+      totals,
+      withoutAmount: counts.withoutAmount,
     };
   }
 
   async summary(query: InvoiceSummaryQuery): Promise<InvoiceSummary> {
     const today = businessToday(this.clock);
     const filters = filterConditions(query, today);
-    const nextEnd = addDays(today, DUE_NEXT_DAYS);
+    const nextEnd = addDays(today, DUE_SOON_DAYS);
 
-    const [counts, totals] = await Promise.all([
+    const [counts, unpaidTotals] = await Promise.all([
       this.prisma.$queryRaw<SummaryCounts[]>`
         SELECT
           count(*) FILTER (WHERE i.status IN ('processing', 'needs_review'))::int AS needs_review,
@@ -175,18 +168,7 @@ export class InvoiceListService {
           )::int AS due_next
         ${INVOICE_FROM}
         ${whereClause(filters)}`,
-      // Summed in SQL as numeric (exact); trim_scale drops the trailing zeros of numeric(18,4).
-      this.prisma.$queryRaw<{ currency: string; amount: string }[]>`
-        SELECT i.amount_due_currency AS currency, trim_scale(sum(i.amount_due))::text AS amount
-        ${INVOICE_FROM}
-        ${whereClause([
-          ...filters,
-          Prisma.sql`i.status = 'unpaid'`,
-          Prisma.sql`i.amount_due IS NOT NULL`,
-          Prisma.sql`i.amount_due_currency IS NOT NULL`,
-        ])}
-        GROUP BY i.amount_due_currency
-        ORDER BY i.amount_due_currency`,
+      this.totalsByCurrency([...filters, statusCondition('unpaid')]),
     ]);
 
     const row = counts[0];
@@ -199,7 +181,7 @@ export class InvoiceListService {
         rejected: row.rejected,
         all: row.total,
       },
-      unpaidTotals: totals.map(({ currency, amount }) => ({ currency, amount })),
+      unpaidTotals,
       unpaidWithoutAmount: row.unpaid_without_amount,
       overdueCount: row.overdue,
       dueNext7Count: row.due_next,
@@ -231,10 +213,35 @@ export class InvoiceListService {
     };
   }
 
-  private async count(where: Prisma.Sql): Promise<number> {
-    const [row] = await this.prisma.$queryRaw<{ total: number }[]>`
-      SELECT count(*)::int AS total ${INVOICE_FROM} ${where}`;
-    return row?.total ?? 0;
+  private async counts(where: Prisma.Sql): Promise<{ total: number; withoutAmount: number }> {
+    const [row] = await this.prisma.$queryRaw<{ total: number; without_amount: number }[]>`
+      SELECT
+        count(*)::int AS total,
+        count(*) FILTER (
+          WHERE i.amount_due IS NULL OR i.amount_due_currency IS NULL
+        )::int AS without_amount
+      ${INVOICE_FROM} ${where}`;
+    return { total: row?.total ?? 0, withoutAmount: row?.without_amount ?? 0 };
+  }
+
+  /**
+   * amount_due per amount_due_currency over the rows matching `conditions`, sorted by currency.
+   * Summed in SQL as numeric (exact); trim_scale drops the trailing zeros of numeric(18,4).
+   */
+  private async totalsByCurrency(
+    conditions: readonly (Prisma.Sql | null)[],
+  ): Promise<CurrencyTotal[]> {
+    const rows = await this.prisma.$queryRaw<CurrencyTotal[]>`
+      SELECT i.amount_due_currency AS currency, trim_scale(sum(i.amount_due))::text AS amount
+      ${INVOICE_FROM}
+      ${whereClause([
+        ...conditions,
+        Prisma.sql`i.amount_due IS NOT NULL`,
+        Prisma.sql`i.amount_due_currency IS NOT NULL`,
+      ])}
+      GROUP BY i.amount_due_currency
+      ORDER BY i.amount_due_currency`;
+    return rows.map(({ currency, amount }) => ({ currency, amount }));
   }
 
   private async orderedIds(
@@ -268,7 +275,7 @@ export class InvoiceListService {
       category: row.category,
       airportIata: row.airportIata,
       locationText: row.locationText,
-      flags: storedFlagsSchema.parse(row.flags),
+      flags: flagSummariesFromJson(row.flags),
       paidAt: fromDateColumn(row.paidAt),
       dueState: dueStateOf(row.status, dueDate, today),
     };
@@ -295,8 +302,7 @@ export class InvoiceListService {
       row.airportIata ?? row.locationText,
       row.aircraftRegistration,
       row.flightNumbers.join(' '),
-      storedFlagsSchema
-        .parse(row.flags)
+      flagSummariesFromJson(row.flags)
         .map((flag) => flag.code)
         .join(' '),
       row.approvedAt?.toISOString() ?? null,

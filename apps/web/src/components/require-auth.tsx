@@ -1,8 +1,12 @@
+import { Button } from '@heroui/react';
+import { lazy } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
-import { Button } from '@/components/ui/button';
 import { useMe } from '@/lib/auth';
 import { CurrentUserContext } from '@/lib/current-user';
-import { SetPasswordPage } from '@/pages/set-password-page';
+
+const SetPasswordPage = lazy(async () => ({
+  default: (await import('@/pages/set-password-page')).SetPasswordPage,
+}));
 
 /**
  * Route gate: renders children only with a valid session, otherwise redirects to /login.
@@ -19,8 +23,8 @@ export function RequireAuth() {
     return (
       <main className="grid min-h-svh place-items-center px-4">
         <div className="max-w-sm space-y-3 text-center">
-          <p className="text-base">{me.error.message}</p>
-          <Button variant="outline" onClick={() => void me.refetch()}>
+          <p>{me.error.message}</p>
+          <Button variant="outline" onPress={() => void me.refetch()}>
             Try again
           </Button>
         </div>

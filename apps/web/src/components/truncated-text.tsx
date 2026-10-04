@@ -1,11 +1,10 @@
-import { useRef, useState } from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn } from '@heroui/react';
+import { useState } from 'react';
 
 /**
- * Text cut to fit its container (one line with an ellipsis, or `lines={2}`); hovering shows the
- * full value in a tooltip, but only when it is actually cut. Screen readers always get the full
- * text.
+ * Text cut to fit its container (one line with an ellipsis, or `lines={2}`). Hovering shows the
+ * full value as the native title, only when it is actually cut; it adds no tab stop to dense
+ * tables. Screen readers always get the full text.
  */
 export function TruncatedText({
   text,
@@ -16,34 +15,21 @@ export function TruncatedText({
   lines?: 1 | 2;
   className?: string;
 }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
-
+  const [cut, setCut] = useState(false);
   return (
-    <Tooltip
-      open={open}
-      onOpenChange={(next) => {
-        const el = ref.current;
-        const cut =
-          el !== null && (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
-        setOpen(next && cut);
+    <span
+      title={cut ? text : undefined}
+      onPointerEnter={(e) => {
+        const el = e.currentTarget;
+        setCut(el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
       }}
+      className={cn(
+        'block min-w-0',
+        lines === 1 ? 'truncate' : 'line-clamp-2 break-words',
+        className,
+      )}
     >
-      <TooltipTrigger asChild>
-        <span
-          ref={ref}
-          className={cn(
-            'block min-w-0',
-            lines === 1 ? 'truncate' : 'line-clamp-2 break-words',
-            className,
-          )}
-        >
-          {text}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="start" className="break-words">
-        {text}
-      </TooltipContent>
-    </Tooltip>
+      {text}
+    </span>
   );
 }

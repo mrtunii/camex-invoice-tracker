@@ -1,81 +1,30 @@
 import type { InboxEmail } from '@camex/shared';
+import { Button, Table } from '@heroui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { TableEmpty, TablePanel } from '@/components/table-panel';
 import { TruncatedText } from '@/components/truncated-text';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { UploadInvoicesDialog } from '@/components/upload-invoices-dialog';
 import { appConfig } from '@/lib/config';
 import { formatTimestamp } from '@/lib/format';
-import { EmailSheet } from './email-sheet';
+import { invoicesQueryKey } from '@/pages/invoices/invoices-query';
+import { EmailDrawer } from './email-drawer';
 import { InboxAddress } from './inbox-address';
-import { InvoiceChip } from './invoice-chip';
 import { inboxQueryKey, useInbox } from './inbox-query';
+import { InvoiceLink } from './invoice-link';
 
-function InboxRow({ email, onOpen }: { email: InboxEmail; onOpen: () => void }) {
+function IgnoredAttachments({ email }: { email: InboxEmail }) {
   const ignored = email.attachments.filter((a) => !a.processed);
+  if (ignored.length === 0) return <span className="text-muted">—</span>;
   return (
-    <TableRow className="cursor-pointer align-top" onClick={onOpen}>
-      <TableCell className="whitespace-nowrap">{formatTimestamp(email.receivedAt)}</TableCell>
-      <TableCell>
-        <TruncatedText text={email.fromAddress ?? '—'} className="font-mono text-[0.8125rem]" />
-        {email.provider === 'manual' && (
-          <Badge variant="outline" className="mt-1">
-            Manual upload
-          </Badge>
-        )}
-      </TableCell>
-      <TableCell>
-        {/* The whole row is clickable; this button makes it reachable by keyboard. */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          className="block max-w-full text-left font-medium hover:underline focus-visible:underline focus-visible:outline-none"
-        >
-          {email.subject === null ? (
-            <span className="text-muted-foreground">(no subject)</span>
-          ) : (
-            <TruncatedText text={email.subject} />
-          )}
-        </button>
-      </TableCell>
-      <TableCell>
-        {email.invoices.length === 0 ? (
-          <span className="text-muted-foreground">No PDF</span>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {email.invoices.map((invoice) => (
-              <InvoiceChip key={invoice.id} invoice={invoice} />
-            ))}
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="text-muted-foreground">
-        {ignored.length === 0 ? (
-          '—'
-        ) : (
-          <ul className="space-y-0.5">
-            {ignored.map((a, i) => (
-              <li key={`${a.filename}-${String(i)}`}>
-                <TruncatedText text={a.filename} className="font-mono text-xs" />
-              </li>
-            ))}
-          </ul>
-        )}
-      </TableCell>
-    </TableRow>
+    <ul className="space-y-0.5 text-muted">
+      {ignored.map((a, i) => (
+        <li key={`${a.filename}-${String(i)}`}>
+          <TruncatedText text={a.filename} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -92,88 +41,109 @@ export function InboxPage() {
         title="Inbox"
         description={
           <>
-            Every email received and every manual upload, newest first. Each PDF becomes an invoice;
-            other attachments are ignored.
+            Every email received and every upload, newest first. Each PDF becomes an invoice; other
+            attachments are ignored.
             {inboxAddress !== null && (
-              <span className="mt-1.5 block">
+              <span className="mt-1 block">
                 <InboxAddress address={inboxAddress} />
               </span>
             )}
           </>
         }
-        actions={
+        action={
           <UploadInvoicesDialog
-            onUploaded={() => void queryClient.invalidateQueries({ queryKey: inboxQueryKey })}
+            onUploaded={() => {
+              void queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+              void queryClient.invalidateQueries({ queryKey: invoicesQueryKey });
+            }}
           />
         }
       />
 
       {inbox.isError ? (
-        <p className="text-destructive">{inbox.error.message}</p>
+        <p className="text-danger">{inbox.error.message}</p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
-          {/* Fixed layout: long values truncate (with a tooltip) instead of widening the table. */}
-          <Table className="min-w-[52rem] table-fixed">
-            <colgroup>
-              <col className="w-[9rem]" />
-              <col className="w-[12rem]" />
-              <col />
-              <col className="w-[22rem]" />
-              <col className="w-[8rem]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Received</TableHead>
-                <TableHead>From</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Invoices</TableHead>
-                <TableHead className="whitespace-normal">Ignored attachments</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {inbox.isPending ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                    Loading emails…
-                  </TableCell>
-                </TableRow>
-              ) : emails.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={5}
-                    className="py-12 text-center whitespace-normal text-muted-foreground"
-                  >
-                    <p>Nothing received yet. Emailed invoices and uploads appear here.</p>
-                    {inboxAddress !== null && (
-                      <p className="mt-2">
-                        <InboxAddress address={inboxAddress} />
-                      </p>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                emails.map((email) => (
-                  <InboxRow key={email.id} email={email} onOpen={() => setOpenEmailId(email.id)} />
-                ))
+        <TablePanel>
+          {/* Fixed layout: long values truncate instead of widening the table. */}
+          <Table.Content
+            aria-label="Inbox"
+            className="min-w-[52rem] table-fixed"
+            onRowAction={(key) => setOpenEmailId(String(key))}
+          >
+            <Table.Header>
+              <Table.Column className="w-[9.5rem]">Received</Table.Column>
+              <Table.Column className="w-[13rem]">From</Table.Column>
+              <Table.Column isRowHeader>Subject</Table.Column>
+              <Table.Column className="w-[22rem]">Invoices</Table.Column>
+              <Table.Column className="w-[9rem]">Ignored attachments</Table.Column>
+            </Table.Header>
+            <Table.Body
+              items={emails}
+              renderEmptyState={() => (
+                <TableEmpty loading={inbox.isPending}>
+                  <p>Nothing received yet. Emailed invoices and uploads appear here.</p>
+                  {inboxAddress !== null && (
+                    <p className="mt-2">
+                      <InboxAddress address={inboxAddress} />
+                    </p>
+                  )}
+                </TableEmpty>
               )}
-            </TableBody>
-          </Table>
-        </div>
+            >
+              {(email) => (
+                <Table.Row id={email.id} className="cursor-pointer align-top">
+                  <Table.Cell className="tabular whitespace-nowrap">
+                    {formatTimestamp(email.receivedAt)}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <TruncatedText text={email.fromAddress ?? '—'} />
+                    {email.provider === 'manual' && (
+                      <span className="block text-xs text-muted">Uploaded by hand</span>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="font-medium">
+                    {email.subject === null ? (
+                      <span className="font-normal text-muted">(no subject)</span>
+                    ) : (
+                      <TruncatedText text={email.subject} />
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {email.invoices.length === 0 ? (
+                      <span className="text-muted">No PDF</span>
+                    ) : (
+                      <ul className="space-y-1">
+                        {email.invoices.map((invoice) => (
+                          <li key={invoice.id}>
+                            <InvoiceLink invoice={invoice} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <IgnoredAttachments email={email} />
+                  </Table.Cell>
+                </Table.Row>
+              )}
+            </Table.Body>
+          </Table.Content>
+        </TablePanel>
       )}
 
       {inbox.hasNextPage && (
         <div className="flex justify-center">
           <Button
             variant="outline"
-            onClick={() => void inbox.fetchNextPage()}
-            disabled={inbox.isFetchingNextPage}
+            onPress={() => void inbox.fetchNextPage()}
+            isPending={inbox.isFetchingNextPage}
           >
             {inbox.isFetchingNextPage ? 'Loading…' : 'Load more'}
           </Button>
         </div>
       )}
 
-      <EmailSheet emailId={openEmailId} onClose={() => setOpenEmailId(null)} />
+      <EmailDrawer emailId={openEmailId} onClose={() => setOpenEmailId(null)} />
     </div>
   );
 }

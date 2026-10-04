@@ -1,5 +1,6 @@
 import {
   type BankDetails,
+  DISPUTE_SOON_DAYS,
   type DocumentType,
   type DueDateSource,
   type ExtractedLineItem,
@@ -324,7 +325,11 @@ export function computeFlags(input: FlagInput, today: string): InvoiceFlag[] {
   }
 
   const deadline = invoice.disputeDeadline;
-  if (invoice.status === 'needs_review' && deadline !== null && daysBetween(today, deadline) <= 3) {
+  if (
+    invoice.status === 'needs_review' &&
+    deadline !== null &&
+    daysBetween(today, deadline) <= DISPUTE_SOON_DAYS
+  ) {
     add(
       'DISPUTE_SOON',
       'disputeDeadline',

@@ -1,29 +1,91 @@
+import { type ComponentType, lazy } from 'react';
 import { Navigate, createBrowserRouter } from 'react-router';
-import { AppLayout } from '@/components/app-layout';
 import { RequireAuth } from '@/components/require-auth';
-import { InboxPage } from '@/pages/inbox/inbox-page';
-import { InvoicePage } from '@/pages/invoices/invoice-page';
-import { InvoicesPage } from '@/pages/invoices/invoices-page';
-import { LoginPage } from '@/pages/login-page';
-import { NotFoundPage } from '@/pages/not-found-page';
-import { UsersPage } from '@/pages/users/users-page';
-import { VendorsPage } from '@/pages/vendors/vendors-page';
+import { RootLayout, RouteError } from '@/components/root-layout';
+
+/**
+ * Every page is its own chunk (React.lazy), so /login doesn't download the app shell, the
+ * chart or HeroUI's heavier components. `pick` turns a named export into what lazy() wants.
+ */
+function page<M>(load: () => Promise<M>, pick: (module: M) => ComponentType) {
+  const Page = lazy(async () => ({ default: pick(await load()) }));
+  return <Page />;
+}
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
   {
-    element: <RequireAuth />,
+    element: <RootLayout />,
+    errorElement: <RouteError />,
     children: [
       {
-        element: <AppLayout />,
+        path: '/login',
+        element: page(
+          () => import('@/pages/login-page'),
+          (m) => m.LoginPage,
+        ),
+      },
+      {
+        element: <RequireAuth />,
         children: [
-          { index: true, element: <Navigate to="/invoices" replace /> },
-          { path: 'invoices', element: <InvoicesPage /> },
-          { path: 'invoices/:id', element: <InvoicePage /> },
-          { path: 'inbox', element: <InboxPage /> },
-          { path: 'vendors', element: <VendorsPage /> },
-          { path: 'users', element: <UsersPage /> },
-          { path: '*', element: <NotFoundPage /> },
+          {
+            element: page(
+              () => import('@/components/app-layout'),
+              (m) => m.AppLayout,
+            ),
+            children: [
+              {
+                index: true,
+                element: page(
+                  () => import('@/pages/home/home-page'),
+                  (m) => m.HomePage,
+                ),
+              },
+              {
+                path: 'invoices',
+                element: page(
+                  () => import('@/pages/invoices/invoices-page'),
+                  (m) => m.InvoicesPage,
+                ),
+              },
+              {
+                path: 'invoices/:id',
+                element: page(
+                  () => import('@/pages/invoices/invoice-page'),
+                  (m) => m.InvoicePage,
+                ),
+              },
+              {
+                path: 'inbox',
+                element: page(
+                  () => import('@/pages/inbox/inbox-page'),
+                  (m) => m.InboxPage,
+                ),
+              },
+              {
+                path: 'vendors',
+                element: page(
+                  () => import('@/pages/vendors/vendors-page'),
+                  (m) => m.VendorsPage,
+                ),
+              },
+              {
+                path: 'team',
+                element: page(
+                  () => import('@/pages/team/team-page'),
+                  (m) => m.TeamPage,
+                ),
+              },
+              // The Team page was called Users until T05b.
+              { path: 'users', element: <Navigate to="/team" replace /> },
+              {
+                path: '*',
+                element: page(
+                  () => import('@/pages/not-found-page'),
+                  (m) => m.NotFoundPage,
+                ),
+              },
+            ],
+          },
         ],
       },
     ],

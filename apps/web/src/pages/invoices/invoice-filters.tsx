@@ -1,11 +1,22 @@
 import { type InvoiceCategory, invoiceCategorySchema } from '@camex/shared';
-import { AlertCircle, Search, X } from 'lucide-react';
+import {
+  Button,
+  ComboBox,
+  DateField,
+  DateRangePicker,
+  Input,
+  ListBox,
+  Popover,
+  RangeCalendar,
+  SearchField,
+  Select,
+  Switch,
+  cn,
+} from '@heroui/react';
+import { parseDate } from '@internationalized/date';
+import { SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { type ComboboxOption, Combobox } from '@/components/combobox';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { CATEGORY_LABELS } from '@/lib/invoice-labels';
-import { cn } from '@/lib/utils';
 import { useVendors } from '@/pages/vendors/vendors-query';
 import { type ListFilters, NO_FILTERS, hasActiveFilters } from './list-params';
 
@@ -32,24 +43,18 @@ function SearchBox({ value, onChange }: { value: string; onChange: (q: string) =
   const tooShort = text.trim().length === 1;
   return (
     <div className="relative w-full sm:w-60">
-      <Search
-        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden
-      />
-      <Input
-        type="search"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Vendor, invoice #, flight, reg."
-        aria-label="Search invoices"
-        aria-describedby={tooShort ? 'invoice-search-hint' : undefined}
-        className="pl-8"
-      />
+      <SearchField value={text} onChange={setText} aria-label="Search invoices" fullWidth>
+        <SearchField.Group>
+          <SearchField.SearchIcon />
+          <SearchField.Input
+            placeholder="Vendor, invoice #, flight…"
+            aria-describedby={tooShort ? 'invoice-search-hint' : undefined}
+          />
+          <SearchField.ClearButton />
+        </SearchField.Group>
+      </SearchField>
       {tooShort && (
-        <p
-          id="invoice-search-hint"
-          className="absolute top-full left-0 mt-0.5 text-xs text-muted-foreground"
-        >
+        <p id="invoice-search-hint" className="absolute top-full left-0 mt-0.5 text-xs text-muted">
           Type at least 2 characters
         </p>
       )}
@@ -57,28 +62,263 @@ function SearchBox({ value, onChange }: { value: string; onChange: (q: string) =
   );
 }
 
-let currencyOptionsCache: ComboboxOption[] | null = null;
+interface Option {
+  id: string;
+  label: string;
+}
 
-/** ISO 4217 codes from the browser, the usual ones first. */
-function currencyOptions(): ComboboxOption[] {
-  if (currencyOptionsCache) return currencyOptionsCache;
-  const names = new Intl.DisplayNames(['en'], { type: 'currency' });
+let currencyCache: { options: Option[]; names: Map<string, string> } | null = null;
+
+/** ISO 4217 codes from the browser, the usual ones first; names for search ("lari" → GEL). */
+function currencies() {
+  if (currencyCache) return currencyCache;
+  const display = new Intl.DisplayNames(['en'], { type: 'currency' });
   const first = ['GEL', 'USD', 'EUR'];
   const codes = [
     ...first,
     ...Intl.supportedValuesOf('currency').filter((code) => !first.includes(code)),
   ];
-  currencyOptionsCache = codes.map((code) => ({
-    value: code,
-    label: code,
-    keywords: names.of(code) ?? '',
-  }));
-  return currencyOptionsCache;
+  currencyCache = {
+    options: codes.map((code) => ({ id: code, label: code })),
+    names: new Map(codes.map((code) => [code, display.of(code) ?? ''])),
+  };
+  return currencyCache;
 }
 
-const selectClass =
-  'h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
+/**
+ * A searchable single choice that can be cleared (vendor, currency). `filter` matches typed text
+ * against an option's label (and anything else it knows).
+ */
+function FilterComboBox({
+  label,
+  placeholder,
+  options,
+  value,
+  onChange,
+  emptyText,
+  matches = (text, input) => text.toLowerCase().includes(input.toLowerCase()),
+  className,
+}: {
+  label: string;
+  placeholder: string;
+  options: Option[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+  emptyText: string;
+  matches?: (text: string, input: string) => boolean;
+  className?: string;
+}) {
+  return (
+    <ComboBox
+      aria-label={label}
+      value={value}
+      onChange={(key) => onChange(key === null || Array.isArray(key) ? null : String(key))}
+      defaultFilter={(text, input) => input === '' || matches(text, input)}
+      className={cn('w-40', className)}
+    >
+      <ComboBox.InputGroup>
+        <Input placeholder={placeholder} />
+        <ComboBox.Trigger />
+      </ComboBox.InputGroup>
+      <ComboBox.Popover className="min-w-56">
+        <ListBox
+          items={options}
+          renderEmptyState={() => <p className="px-3 py-2 text-muted">{emptyText}</p>}
+        >
+          {(option) => (
+            <ListBox.Item id={option.id} textValue={option.label}>
+              {option.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          )}
+        </ListBox>
+      </ComboBox.Popover>
+    </ComboBox>
+  );
+}
 
+const CATEGORY_OPTIONS = (Object.keys(CATEGORY_LABELS) as InvoiceCategory[]).map((category) => ({
+  id: category,
+  label: CATEGORY_LABELS[category],
+}));
+
+function CategorySelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: InvoiceCategory | null;
+  onChange: (value: InvoiceCategory | null) => void;
+  className?: string;
+}) {
+  return (
+    <Select
+      aria-label="Category"
+      placeholder="All categories"
+      value={value}
+      onChange={(key) => {
+        const parsed = invoiceCategorySchema.safeParse(key);
+        onChange(parsed.success ? parsed.data : null);
+      }}
+      className={cn('w-40', className)}
+    >
+      <Select.Trigger>
+        <Select.Value />
+        <Select.ClearButton />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox items={CATEGORY_OPTIONS}>
+          {(option) => (
+            <ListBox.Item id={option.id} textValue={option.label}>
+              {option.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          )}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
+/**
+ * Invoice date range. A range has both ends; a URL with only one (typed by hand) still filters,
+ * and Clear filters removes it.
+ */
+function InvoiceDateRange({
+  from,
+  to,
+  onChange,
+  className,
+}: {
+  from: string | null;
+  to: string | null;
+  onChange: (range: { invoiceDateFrom: string | null; invoiceDateTo: string | null }) => void;
+  className?: string;
+}) {
+  const value =
+    from !== null && to !== null ? { start: parseDate(from), end: parseDate(to) } : null;
+  return (
+    <DateRangePicker
+      aria-label="Invoice date"
+      value={value}
+      onChange={(range) =>
+        onChange({
+          invoiceDateFrom: range ? range.start.toString() : null,
+          invoiceDateTo: range ? range.end.toString() : null,
+        })
+      }
+      className={cn('w-60', className)}
+    >
+      <DateField.Group fullWidth>
+        <DateField.Input slot="start">
+          {(segment) => <DateField.Segment segment={segment} />}
+        </DateField.Input>
+        <DateRangePicker.RangeSeparator />
+        <DateField.Input slot="end">
+          {(segment) => <DateField.Segment segment={segment} />}
+        </DateField.Input>
+        <DateField.Suffix>
+          <DateRangePicker.Trigger aria-label="Choose invoice dates">
+            <DateRangePicker.TriggerIndicator />
+          </DateRangePicker.Trigger>
+        </DateField.Suffix>
+      </DateField.Group>
+      <DateRangePicker.Popover>
+        <RangeCalendar aria-label="Invoice date">
+          <RangeCalendar.Header>
+            <RangeCalendar.YearPickerTrigger>
+              <RangeCalendar.YearPickerTriggerHeading />
+              <RangeCalendar.YearPickerTriggerIndicator />
+            </RangeCalendar.YearPickerTrigger>
+            <RangeCalendar.NavButton slot="previous" />
+            <RangeCalendar.NavButton slot="next" />
+          </RangeCalendar.Header>
+          <RangeCalendar.Grid>
+            <RangeCalendar.GridHeader>
+              {(day) => <RangeCalendar.HeaderCell>{day}</RangeCalendar.HeaderCell>}
+            </RangeCalendar.GridHeader>
+            <RangeCalendar.GridBody>
+              {(date) => <RangeCalendar.Cell date={date} />}
+            </RangeCalendar.GridBody>
+          </RangeCalendar.Grid>
+          <RangeCalendar.YearPickerGrid>
+            <RangeCalendar.YearPickerGridBody>
+              {({ year }) => <RangeCalendar.YearPickerCell year={year} />}
+            </RangeCalendar.YearPickerGridBody>
+          </RangeCalendar.YearPickerGrid>
+        </RangeCalendar>
+      </DateRangePicker.Popover>
+    </DateRangePicker>
+  );
+}
+
+/** Vendor, category, currency and date: inline on wide screens, in a popover on narrow ones. */
+function MoreFilters({
+  filters,
+  onChange,
+  stacked,
+}: {
+  filters: ListFilters;
+  onChange: SetFilters;
+  stacked: boolean;
+}) {
+  const vendors = useVendors('');
+  const vendorOptions = useMemo(
+    () => (vendors.data ?? []).map((vendor) => ({ id: vendor.id, label: vendor.name })),
+    [vendors.data],
+  );
+  const { options: currencyOptions, names } = currencies();
+  const width = stacked ? 'w-full' : undefined;
+
+  return (
+    <>
+      <FilterComboBox
+        label="Vendor"
+        placeholder="All vendors"
+        options={vendorOptions}
+        value={filters.vendorId}
+        onChange={(vendorId) => onChange({ vendorId })}
+        emptyText={vendors.isPending ? 'Loading…' : 'No vendor found'}
+        className={width}
+      />
+      <CategorySelect
+        value={filters.category}
+        onChange={(category) => onChange({ category })}
+        className={width}
+      />
+      <FilterComboBox
+        label="Currency"
+        placeholder="Any currency"
+        options={currencyOptions}
+        value={filters.currency}
+        onChange={(currency) => onChange({ currency })}
+        emptyText="No currency found"
+        matches={(code, input) =>
+          `${code} ${names.get(code) ?? ''}`.toLowerCase().includes(input.toLowerCase())
+        }
+        className={cn('w-32', width)}
+      />
+      <InvoiceDateRange
+        from={filters.invoiceDateFrom}
+        to={filters.invoiceDateTo}
+        onChange={onChange}
+        className={width}
+      />
+    </>
+  );
+}
+
+function countMoreFilters(filters: ListFilters): number {
+  return [
+    filters.vendorId,
+    filters.category,
+    filters.currency,
+    filters.invoiceDateFrom ?? filters.invoiceDateTo,
+  ].filter((value) => value !== null).length;
+}
+
+/** Filters on one row: search, vendor, category, currency, invoice date range, errors only. */
 export function InvoiceFilters({
   filters,
   onChange,
@@ -86,106 +326,43 @@ export function InvoiceFilters({
   filters: ListFilters;
   onChange: SetFilters;
 }) {
-  const vendors = useVendors('');
-  const vendorOptions = useMemo(
-    () => (vendors.data ?? []).map((vendor) => ({ value: vendor.id, label: vendor.name })),
-    [vendors.data],
-  );
   const onSearch = useCallback((q: string) => onChange({ q }, { replace: true }), [onChange]);
+  const more = countMoreFilters(filters);
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-3" role="search">
       <SearchBox value={filters.q} onChange={onSearch} />
-      <Combobox
-        label="Vendor"
-        placeholder="All vendors"
-        searchPlaceholder="Search vendors…"
-        emptyText={vendors.isPending ? 'Loading…' : 'No vendor found'}
-        options={vendorOptions}
-        value={filters.vendorId}
-        onChange={(vendorId) => onChange({ vendorId })}
-        className="w-44"
-      />
-      <select
-        aria-label="Category"
-        value={filters.category ?? ''}
-        onChange={(e) => {
-          const parsed = invoiceCategorySchema.safeParse(e.target.value);
-          onChange({ category: parsed.success ? parsed.data : null });
-        }}
-        className={cn(selectClass, 'w-40', filters.category === null && 'text-muted-foreground')}
+
+      <div className="hidden flex-wrap items-center gap-2 lg:flex">
+        <MoreFilters filters={filters} onChange={onChange} stacked={false} />
+      </div>
+      <Popover>
+        <Button variant="outline" className="lg:hidden">
+          <SlidersHorizontal aria-hidden />
+          {more > 0 ? `Filters (${String(more)})` : 'Filters'}
+        </Button>
+        <Popover.Content placement="bottom start" className="w-72">
+          <Popover.Dialog aria-label="Filters" className="flex flex-col gap-3 p-3">
+            <MoreFilters filters={filters} onChange={onChange} stacked />
+          </Popover.Dialog>
+        </Popover.Content>
+      </Popover>
+
+      <Switch
+        isSelected={filters.hasErrors}
+        onChange={(hasErrors) => onChange({ hasErrors })}
+        className="ml-1"
       >
-        <option value="">All categories</option>
-        {(Object.keys(CATEGORY_LABELS) as InvoiceCategory[]).map((category) => (
-          <option key={category} value={category} className="text-foreground">
-            {CATEGORY_LABELS[category]}
-          </option>
-        ))}
-      </select>
-      <Combobox
-        label="Currency"
-        placeholder="Any currency"
-        searchPlaceholder="Code or name…"
-        options={currencyOptions()}
-        value={filters.currency}
-        onChange={(currency) => onChange({ currency })}
-        className="w-36"
-      />
-      <fieldset className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto sm:flex-nowrap">
-        <legend className="sr-only">Invoice date</legend>
-        <span className="w-full shrink-0 text-sm text-muted-foreground sm:w-auto" aria-hidden>
-          Invoice date
-        </span>
-        <Input
-          type="date"
-          aria-label="Invoice date from"
-          value={filters.invoiceDateFrom ?? ''}
-          max={filters.invoiceDateTo ?? undefined}
-          onChange={(e) => onChange({ invoiceDateFrom: e.target.value || null })}
-          className="min-w-0 flex-1 sm:w-36 sm:flex-none"
-        />
-        <span className="text-muted-foreground" aria-hidden>
-          –
-        </span>
-        <Input
-          type="date"
-          aria-label="Invoice date to"
-          value={filters.invoiceDateTo ?? ''}
-          min={filters.invoiceDateFrom ?? undefined}
-          onChange={(e) => onChange({ invoiceDateTo: e.target.value || null })}
-          className="min-w-0 flex-1 sm:w-36 sm:flex-none"
-        />
-      </fieldset>
-      <Button
-        type="button"
-        variant="outline"
-        aria-pressed={filters.hasErrors}
-        onClick={() => onChange({ hasErrors: !filters.hasErrors })}
-        className={cn(
-          'font-normal',
-          filters.hasErrors &&
-            'border-destructive/50 bg-destructive/8 text-destructive hover:bg-destructive/12 hover:text-destructive',
-        )}
-      >
-        <AlertCircle aria-hidden />
-        Has errors
-      </Button>
-      {filters.due !== null && (
-        <span className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-muted pr-1 pl-2.5 text-sm">
-          {filters.due === 'overdue' ? 'Overdue' : 'Due in 7 days'}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Remove due filter"
-            onClick={() => onChange({ due: null })}
-          >
-            <X aria-hidden />
-          </Button>
-        </span>
-      )}
+        <Switch.Content>
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+          Errors only
+        </Switch.Content>
+      </Switch>
+
       {hasActiveFilters(filters) && (
-        <Button type="button" variant="ghost" onClick={() => onChange(NO_FILTERS)}>
+        <Button variant="ghost" onPress={() => onChange(NO_FILTERS)}>
           Clear filters
         </Button>
       )}

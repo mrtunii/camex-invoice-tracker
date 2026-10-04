@@ -1,18 +1,9 @@
+import { Button, Form, Modal, toast } from '@heroui/react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { plural } from '@/lib/format';
 import { VendorFields } from './vendor-fields';
 import {
   type VendorFormValues,
@@ -41,47 +32,50 @@ export function AddVendorDialog() {
       onSuccess: (vendor) => {
         toast.success(
           vendor.openInvoiceCount > 0
-            ? `Added ${vendor.name} and linked ${vendor.openInvoiceCount} invoice${vendor.openInvoiceCount === 1 ? '' : 's'}`
+            ? `Added ${vendor.name} and linked ${plural(vendor.openInvoiceCount, 'invoice', 'invoices')}`
             : `Added ${vendor.name}`,
         );
         handleOpenChange(false);
       },
       onError: (error) => {
-        if (!showVendorFieldErrors(form, error)) toast.error(error.message);
+        if (!showVendorFieldErrors(form, error)) toast.danger(error.message);
       },
     });
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button>
-          <Plus />
-          Add vendor
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <form noValidate onSubmit={form.handleSubmit(submit)}>
-          <DialogHeader>
-            <DialogTitle>Add vendor</DialogTitle>
-            <DialogDescription>
-              Invoices waiting for review are matched against the name, aliases and domains as soon
-              as you save.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <VendorFields form={form} idPrefix="new-vendor" />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={createVendor.isPending}>
-              {createVendor.isPending ? 'Adding…' : 'Add vendor'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button onPress={() => setOpen(true)}>
+        <Plus aria-hidden />
+        Add vendor
+      </Button>
+      <Modal.Backdrop isOpen={open} onOpenChange={handleOpenChange}>
+        <Modal.Container size="md">
+          <Modal.Dialog>
+            <Modal.CloseTrigger />
+            <Form validationBehavior="aria" onSubmit={(e) => void form.handleSubmit(submit)(e)}>
+              <Modal.Header>
+                <Modal.Heading>Add vendor</Modal.Heading>
+                <p className="text-muted">
+                  Invoices waiting for review are matched against the name, aliases and domains as
+                  soon as you save.
+                </p>
+              </Modal.Header>
+              <Modal.Body className="py-4">
+                <VendorFields form={form} />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button type="button" variant="ghost" onPress={() => handleOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" isPending={createVendor.isPending}>
+                  {createVendor.isPending ? 'Adding…' : 'Add vendor'}
+                </Button>
+              </Modal.Footer>
+            </Form>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </>
   );
 }

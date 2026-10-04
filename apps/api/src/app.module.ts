@@ -4,6 +4,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { ClockModule } from './clock/clock.module.js';
 import { EnvModule } from './config/env.module.js';
 import type { Env } from './config/env.js';
+import { DashboardModule } from './dashboard/dashboard.module.js';
 import { HealthController } from './health/health.controller.js';
 import { InboxModule } from './inbox/inbox.module.js';
 import { IngestionModule } from './ingestion/ingestion.module.js';
@@ -34,6 +35,7 @@ export class AppModule {
         InboxModule,
         InvoicesModule,
         VendorsModule,
+        DashboardModule,
       ],
       controllers: [HealthController],
     };

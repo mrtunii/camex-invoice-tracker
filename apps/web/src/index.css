@@ -1,138 +1,217 @@
 @import 'tailwindcss';
-@import 'tw-animate-css';
-@import 'shadcn/tailwind.css';
+@import '@heroui/styles';
 @import '@fontsource-variable/atkinson-hyperlegible-next';
 @import '@fontsource-variable/atkinson-hyperlegible-mono';
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * "Dark cockpit" design system (T05b, SPEC §10). When nothing is wrong, nothing is coloured.
+ * Colour means one thing each: red = warning (act now), amber = caution (act soon), green = done,
+ * cyan-blue = selected / action. Everything else is neutral.
+ *
+ * The tokens are the CTO's hex values, converted to OKLCH and mapped onto HeroUI's variables:
+ * canvas → --background, ink → --foreground, line → --border/--separator, primary → --accent,
+ * warning → --danger, caution → --warning, ok → --success.
+ */
 
-@theme inline {
-  --font-heading: var(--font-sans);
-  /* Hyperlegible faces: invoice numbers, IBANs and registrations need unambiguous 0/O and 1/l/I. */
+@theme {
+  /* Hyperlegible faces: Next for everything; Mono only where 0/O and 1/l must not be confused. */
   --font-sans: 'Atkinson Hyperlegible Next Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Atkinson Hyperlegible Mono Variable', ui-monospace, monospace;
-  --color-attention: var(--attention);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /*
+   * Type scale (px): 13 meta (xs) · 14 body and tables (sm) · 16 section titles (base) · 20 page
+   * titles (xl) · 30 the Home status (3xl). Tailwind's own size names on purpose: class merging
+   * (tailwind-merge, also inside HeroUI) only knows those as font sizes. 12 px isn't in the scale.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
+  --text-3xl--line-height: 1.2;
+
+  /* Two radii on purpose: 6 px for controls (inputs, buttons), 10 px for panels and the table. */
+  --radius-control: 6px;
+  --radius-panel: 10px;
+
+  /* The sidebar: 224 px, icons only below 1024 px. */
+  --spacing-sidebar: 14rem;
+  --spacing-sidebar-collapsed: 4rem;
 }
 
-:root {
-  /* Camex palette: cool paper, ink, steel-blue focus. Amber (--attention) is reserved for
-       "look here" signals: the current page now, due-soon/dispute warnings later. */
-  --background: #f6f7f9;
-  --foreground: #17212b;
-  --card: #ffffff;
-  --card-foreground: #17212b;
-  --popover: #ffffff;
-  --popover-foreground: #17212b;
-  --primary: #17212b;
-  --primary-foreground: #ffffff;
-  --secondary: #eef0f3;
-  --secondary-foreground: #17212b;
-  --muted: #eef0f3;
-  --muted-foreground: #5b6675;
-  --accent: #eef0f3;
-  --accent-foreground: #17212b;
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: #dde1e7;
-  --input: #cfd5dd;
-  --ring: #3b6ea8;
-  --attention: #e0a526;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.5rem;
-  --sidebar: #17212b;
-  --sidebar-foreground: #c9d1db;
-  --sidebar-primary: #e0a526;
-  --sidebar-primary-foreground: #17212b;
-  --sidebar-accent: #223040;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #2a3846;
-  --sidebar-ring: #e0a526;
+@theme inline {
+  --color-canvas: var(--background);
+  --color-ink: var(--foreground);
+  --color-line: var(--border);
+  --color-primary: var(--accent);
+  --color-caution: var(--warning);
+  --color-ok: var(--success);
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
+/* Theme variables live in the same layer as HeroUI's, after it, so they win. */
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
+  :root,
+  .light,
+  [data-theme='light'] {
+    --background: oklch(96.92% 0.0034 247.86); /* canvas  #F3F5F7 */
+    --foreground: oklch(24.43% 0.0248 253.76); /* ink     #18212C */
+    --surface: oklch(100% 0 0); /* surface #FFFFFF */
+    --surface-foreground: var(--foreground);
+    --surface-secondary: color-mix(in oklab, var(--surface) 55%, var(--background));
+    --surface-tertiary: var(--background);
+    --overlay: oklch(100% 0 0);
+    --overlay-foreground: var(--foreground);
+    --muted: oklch(50.25% 0.0261 254.52); /* muted   #5A6573 */
+    --border: oklch(90.77% 0.0098 252.82); /* line    #DCE1E7 */
+    --separator: var(--border);
+    --default: color-mix(in oklab, var(--background) 70%, var(--border));
+    --default-foreground: var(--foreground);
+    --accent: oklch(49.57% 0.1029 235.48); /* primary #0A6A94 */
+    --accent-foreground: oklch(100% 0 0);
+    --danger: oklch(54.04% 0.1765 28.56); /* warning #C0362C */
+    --danger-foreground: oklch(100% 0 0);
+    --warning: oklch(56.66% 0.1268 65.3); /* caution #A86400 */
+    --warning-foreground: oklch(100% 0 0);
+    --success: oklch(51.89% 0.1072 153.02); /* ok      #2D7A4A */
+    --success-foreground: oklch(100% 0 0);
+    --segment: var(--surface);
+    --segment-foreground: var(--foreground);
+    --focus: var(--accent);
+    --link: var(--accent);
+    --field-background: var(--surface);
+    --field-foreground: var(--foreground);
+    --field-placeholder: var(--muted);
+    --field-border: var(--border);
+    /* Focus is cyan-blue, like every other selected or focused thing. */
+    --field-border-focus: var(--accent);
+    /* Panels separate from the canvas by contrast and a 1 px line, never by a shadow. */
+    --surface-shadow: none;
+    --field-shadow: none;
+    --overlay-shadow: 0 1px 2px 0 rgb(24 33 44 / 0.06), 0 8px 24px 0 rgb(24 33 44 / 0.12);
   }
-  body {
-    @apply bg-background text-foreground;
+
+  .dark,
+  [data-theme='dark'] {
+    --background: oklch(19.78% 0.0144 253.17); /* canvas  #11161C */
+    --foreground: oklch(93.19% 0.0097 252.81); /* ink     #E4E9EF */
+    --surface: oklch(24.04% 0.0225 254.25); /* surface #18202A */
+    --surface-foreground: var(--foreground);
+    --surface-secondary: color-mix(in oklab, var(--surface) 55%, var(--background));
+    --surface-tertiary: var(--background);
+    --overlay: oklch(27% 0.024 254.25);
+    --overlay-foreground: var(--foreground);
+    --muted: oklch(72.02% 0.0245 252.24); /* muted   #9AA6B4 */
+    --border: oklch(32.14% 0.027 255.13); /* line    #2A3441 */
+    --separator: var(--border);
+    --default: color-mix(in oklab, var(--surface) 70%, var(--border));
+    --default-foreground: var(--foreground);
+    --accent: oklch(72.49% 0.1114 229.43); /* primary #4FB3DE */
+    --accent-foreground: oklch(19.78% 0.0144 253.17);
+    --danger: oklch(69.75% 0.1586 26.5); /* warning #F07167 */
+    --danger-foreground: oklch(19.78% 0.0144 253.17);
+    --warning: oklch(76.49% 0.1399 72.95); /* caution #E8A33D */
+    --warning-foreground: oklch(19.78% 0.0144 253.17);
+    --success: oklch(73.8% 0.1266 157.18); /* ok      #5CC28A */
+    --success-foreground: oklch(19.78% 0.0144 253.17);
+    --segment: var(--surface);
+    --segment-foreground: var(--foreground);
+    --focus: var(--accent);
+    --link: var(--accent);
+    --field-background: var(--background);
+    --field-foreground: var(--foreground);
+    --field-placeholder: var(--muted);
+    --field-border: var(--border);
+    /* Focus is cyan-blue, like every other selected or focused thing. */
+    --field-border-focus: var(--accent);
+    --surface-shadow: none;
+    --field-shadow: none;
+    --overlay-shadow: 0 0 0 1px var(--border), 0 12px 32px 0 rgb(0 0 0 / 0.45);
   }
+
+  :root {
+    /* HeroUI's panels and overlays (menus, popovers, dialogs, alerts) round by this one variable. */
+    --radius-3xl: var(--radius-panel);
+    --field-radius: var(--radius-control);
+    --field-border-width: 1px;
+    --skeleton-animation: pulse;
+    --tooltip-delay: 400ms;
+  }
+
   html {
-    @apply font-sans;
+    font-family: var(--font-sans);
+  }
+
+  body {
+    @apply bg-background text-sm text-foreground antialiased;
+  }
+
+  /* Amounts and dates line up in columns. */
+  .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Controls: 6 px. HeroUI rounds buttons and segments as pills by default. */
+  .button,
+  .toggle-button,
+  .tag {
+    border-radius: var(--radius-control);
+  }
+  .toggle-button-group:not(.toggle-button-group--detached) > .toggle-button:first-child {
+    border-start-start-radius: var(--radius-control);
+    border-end-start-radius: var(--radius-control);
+  }
+  .toggle-button-group:not(.toggle-button-group--detached) > .toggle-button:last-child {
+    border-start-end-radius: var(--radius-control);
+    border-end-end-radius: var(--radius-control);
+  }
+
+  /* An unselected switch must still be visible: ~3:1 against the canvas (WCAG 1.4.11). */
+  .switch {
+    --switch-control-bg: color-mix(in oklab, var(--muted) 65%, var(--background));
+    --switch-control-bg-hover: color-mix(in oklab, var(--muted) 80%, var(--background));
+  }
+
+  /* Panels and overlays that hold content: 10 px. */
+  .modal__dialog,
+  .alert-dialog__dialog {
+    border-radius: var(--radius-panel);
+  }
+
+  /*
+   * Tables sit in a surface panel (see DataPanel): a flat table, a quiet header on the canvas
+   * tint, a hairline between rows, and no column separators.
+   */
+  .table-root--secondary .table__column {
+    @apply bg-surface-secondary text-xs font-medium text-muted;
+    border-radius: 0 !important;
+  }
+  .table-root--secondary .table__column::after {
+    content: none;
+  }
+  .table-root--secondary .table__header {
+    @apply border-b border-line;
+  }
+  .table-root--secondary .table__row .table__cell {
+    @apply border-b border-line text-sm;
+  }
+  .table-root--secondary .table__row:last-child .table__cell {
+    @apply border-b-0;
+  }
+  @media (hover: hover) {
+    .table-root--secondary .table__row[data-href]:hover .table__cell,
+    .table-root--secondary .table__row[data-action]:hover .table__cell {
+      @apply bg-surface-secondary;
+    }
+  }
+}
+
+/* Respect reduced motion everywhere, not only where a component remembered to. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

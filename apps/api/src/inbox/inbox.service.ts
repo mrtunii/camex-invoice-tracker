@@ -6,10 +6,10 @@ import {
   type InboxListQuery,
   type InboxListResponse,
   emailHeadersSchema,
-  invoiceFlagSchema,
 } from '@camex/shared';
 import { z } from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
+import { flagSummariesFromJson } from '../invoices/invoice-columns.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 /** inbound_emails.attachments as stored (snake_case, SPEC §5). */
@@ -36,8 +36,6 @@ const emailSelect = {
 } satisfies Prisma.InboundEmailSelect;
 
 type EmailRow = Prisma.InboundEmailGetPayload<{ select: typeof emailSelect }>;
-
-const storedFlagsSchema = z.array(invoiceFlagSchema.pick({ code: true, severity: true }));
 
 @Injectable()
 export class InboxService {
@@ -85,7 +83,7 @@ export class InboxService {
       attachments: this.attachments(row),
       invoices: row.invoices.map(({ flags, ...invoice }) => ({
         ...invoice,
-        flags: storedFlagsSchema.parse(flags),
+        flags: flagSummariesFromJson(flags),
       })),
     };
   }

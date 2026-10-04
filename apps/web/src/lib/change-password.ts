@@ -2,7 +2,7 @@ import { changePasswordRequestSchema } from '@camex/shared';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
+import { toast } from '@heroui/react';
 import { z } from 'zod';
 import { ApiError, apiNoContent } from './api';
 
@@ -35,7 +35,7 @@ export function useChangePasswordForm(onChanged: () => void) {
       if (error instanceof ApiError && error.status === 400) {
         form.setError('currentPassword', { message: error.message });
       } else {
-        toast.error(error.message);
+        toast.danger(error.message);
       }
     },
   });

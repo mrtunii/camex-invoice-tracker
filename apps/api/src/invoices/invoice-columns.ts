@@ -2,8 +2,10 @@ import {
   type BankDetails,
   type ExtractedInvoice,
   type ExtractedLineItem,
+  type InvoiceFlag,
   bankDetailsSchema,
   extractedLineItemSchema,
+  invoiceFlagSchema,
 } from '@camex/shared';
 import { z } from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
@@ -29,6 +31,18 @@ const bankDetailsJsonSchema = z.object({
   routing_number: z.string().nullable(),
   currency: z.string().nullable(),
 });
+
+const flagSummariesSchema = z.array(
+  invoiceFlagSchema.pick({ code: true, severity: true, message: true }),
+);
+
+/** A stored flag without `field`. */
+export type FlagSummary = Pick<InvoiceFlag, 'code' | 'severity' | 'message'>;
+
+/** invoices.flags as the list, the Inbox and Home show them (T05b): no `field`, order kept. */
+export function flagSummariesFromJson(value: Prisma.JsonValue): FlagSummary[] {
+  return flagSummariesSchema.parse(value);
+}
 
 /** 'YYYY-MM-DD' → the Date Prisma writes to a `date` column (UTC midnight). */
 export function toDateColumn(value: string | null): Date | null {

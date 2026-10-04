@@ -1,13 +1,11 @@
 import { type LoginRequest, loginRequestSchema } from '@camex/shared';
+import { Alert, Button, Form } from '@heroui/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Navigate, useLocation, useNavigate } from 'react-router';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { AuthScreen } from '@/components/auth-screen';
+import { FormTextField } from '@/components/form-text-field';
+import { useDocumentTitle } from '@/lib/document-title';
 import { useLogin, useMe } from '@/lib/auth';
 
 function redirectTarget(state: unknown): string {
@@ -15,7 +13,7 @@ function redirectTarget(state: unknown): string {
     const { from } = state;
     if (typeof from === 'string' && from.startsWith('/') && !from.startsWith('//')) return from;
   }
-  return '/invoices';
+  return '/';
 }
 
 export function LoginPage() {
@@ -24,16 +22,12 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const target = redirectTarget(location.state);
+  useDocumentTitle('Sign in');
 
   const form = useForm<LoginRequest>({
     resolver: zodResolver(loginRequestSchema),
     defaultValues: { email: '', password: '' },
   });
-  const { errors } = form.formState;
-
-  useEffect(() => {
-    document.title = 'Sign in – Camex Invoice Tracker';
-  }, []);
 
   if (me.data) return <Navigate to={target} replace />;
 
@@ -45,59 +39,41 @@ export function LoginPage() {
   );
 
   return (
-    <main className="grid min-h-svh place-items-center bg-background px-4 py-10">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-bold tracking-tight">Camex</span>
-          <span className="text-muted-foreground">Invoice Tracker</span>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Sign in</CardTitle>
-            <CardDescription>
-              Use the account an admin created for you. There is no self sign-up.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form noValidate onSubmit={(e) => void onSubmit(e)} className="space-y-5">
-              {login.error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{login.error.message}</AlertDescription>
-                </Alert>
-              )}
-              <FieldGroup>
-                <Field data-invalid={!!errors.email}>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
-                  <Input
-                    id="email"
-                    type="email"
-                    autoComplete="username"
-                    autoFocus
-                    aria-invalid={!!errors.email}
-                    {...form.register('email')}
-                  />
-                  <FieldError errors={[errors.email]} />
-                </Field>
-                <Field data-invalid={!!errors.password}>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    aria-invalid={!!errors.password}
-                    {...form.register('password')}
-                  />
-                  <FieldError errors={[errors.password]} />
-                </Field>
-              </FieldGroup>
-              <Button type="submit" className="w-full" size="lg" disabled={login.isPending}>
-                {login.isPending ? 'Signing in…' : 'Sign in'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
+    <AuthScreen
+      title="Sign in"
+      description="Use the account an admin created for you. There is no self sign-up."
+    >
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => void onSubmit(e)}
+        className="flex flex-col gap-4"
+      >
+        {login.error && (
+          <Alert status="danger">
+            <Alert.Content>
+              <Alert.Description>{login.error.message}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        )}
+        <FormTextField
+          control={form.control}
+          name="email"
+          label="Email"
+          type="email"
+          autoComplete="username"
+          autoFocus
+        />
+        <FormTextField
+          control={form.control}
+          name="password"
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+        />
+        <Button type="submit" fullWidth isPending={login.isPending} className="mt-2">
+          {login.isPending ? 'Signing in…' : 'Sign in'}
+        </Button>
+      </Form>
+    </AuthScreen>
   );
 }

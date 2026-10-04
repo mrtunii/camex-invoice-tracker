@@ -1,12 +1,12 @@
 import type { AuthUser } from '@camex/shared';
+import { Button, Form, toast } from '@heroui/react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
-import { toast } from 'sonner';
+import { AppToasts } from '@/components/app-toasts';
+import { AuthScreen } from '@/components/auth-screen';
 import { ChangePasswordFields } from '@/components/change-password-form';
-import { useChangePasswordForm } from '@/lib/change-password';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useDocumentTitle } from '@/lib/document-title';
 import { useLogout } from '@/lib/auth';
+import { useChangePasswordForm } from '@/lib/change-password';
 import { useCurrentUser } from '@/lib/current-user';
 import { meQueryKey } from '@/lib/query-client';
 
@@ -18,6 +18,7 @@ export function SetPasswordPage() {
   const user = useCurrentUser();
   const queryClient = useQueryClient();
   const logout = useLogout();
+  useDocumentTitle('Set a new password');
   const { form, pending, onSubmit } = useChangePasswordForm(() => {
     queryClient.setQueryData<AuthUser | null>(meQueryKey, (me) =>
       me ? { ...me, mustChangePassword: false } : me,
@@ -25,51 +26,40 @@ export function SetPasswordPage() {
     toast.success('Password set. Welcome!');
   });
 
-  useEffect(() => {
-    document.title = 'Set a new password – Camex Invoice Tracker';
-  }, []);
-
   return (
-    <main className="grid min-h-svh place-items-center bg-background px-4 py-10">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-bold tracking-tight">Camex</span>
-          <span className="text-muted-foreground">Invoice Tracker</span>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Set a new password</CardTitle>
-            <CardDescription>
-              Your password for <span className="font-mono">{user.email}</span> was set by someone
-              else. Choose your own to continue.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form noValidate onSubmit={(e) => void onSubmit(e)} className="space-y-5">
-              <ChangePasswordFields
-                form={form}
-                currentLabel="Current (temporary) password"
-                idPrefix="set-password"
-              />
-              <Button type="submit" className="w-full" size="lg" disabled={pending}>
-                {pending ? 'Saving…' : 'Set password and continue'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-sm text-muted-foreground">
+    <AuthScreen
+      title="Set a new password"
+      description={
+        <>
+          Your password for <span className="font-medium text-foreground">{user.email}</span> was
+          set by someone else. Choose your own to continue.
+        </>
+      }
+      footer={
+        <p className="text-center text-muted">
           Not you?{' '}
-          <button
-            type="button"
-            className="underline underline-offset-4 hover:text-foreground"
-            onClick={() => logout.mutate()}
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={() => logout.mutate()}
+            className="align-baseline"
           >
             Sign out
-          </button>
+          </Button>
         </p>
-      </div>
-    </main>
+      }
+    >
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => void onSubmit(e)}
+        className="flex flex-col gap-4"
+      >
+        <ChangePasswordFields form={form} currentLabel="Current (temporary) password" />
+        <Button type="submit" fullWidth isPending={pending} className="mt-2">
+          {pending ? 'Saving…' : 'Set password and continue'}
+        </Button>
+      </Form>
+      <AppToasts />
+    </AuthScreen>
   );
 }

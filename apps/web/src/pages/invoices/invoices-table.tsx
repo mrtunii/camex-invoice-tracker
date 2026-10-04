@@ -1,303 +1,209 @@
 import {
-  DUE_SOON_DAYS,
+  DISPUTE_SOON_DAYS,
   type InvoiceListItem,
   type InvoiceListStatus,
   type InvoiceSortKey,
   type SortOrder,
   dateUrgency,
 } from '@camex/shared';
-import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from 'lucide-react';
+import { Table, cn } from '@heroui/react';
 import type { ReactNode } from 'react';
-import { FlagCounts } from '@/components/flag-counts';
-import { InvoiceStatusBadge } from '@/components/invoice-status-badge';
+import { FlagIcon } from '@/components/flag-icon';
+import { Reading, StatusWord } from '@/components/status-word';
+import { TableEmpty, TablePanel } from '@/components/table-panel';
+import { ToneText } from '@/components/tone';
 import { TruncatedText } from '@/components/truncated-text';
-import { Badge } from '@/components/ui/badge';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatDate, formatMoney, formatTimestampParts } from '@/lib/format';
+  type Tone,
+  dueCell,
+  formatDate,
+  formatDay,
+  formatMoney,
+  formatTimestampParts,
+} from '@/lib/format';
 import { CATEGORY_LABELS } from '@/lib/invoice-labels';
-import { cn } from '@/lib/utils';
 
 interface Column {
-  id: string;
+  /** The sort key for sortable columns (so it matches the sort descriptor). */
+  id: InvoiceSortKey | 'vendor' | 'status' | 'invoiceNumber' | 'category' | 'location' | 'flags';
   header: string;
-  /** Fixed width (table-layout: fixed); the vendor column takes the rest. */
-  width?: string;
-  sortKey?: InvoiceSortKey;
-  align?: 'right';
+  /** Fixed width in rem (table-layout: fixed); the vendor column takes the rest. */
+  width?: number;
+  sortable?: boolean;
+  align?: 'end';
+  /** Header shown to screen readers only. */
+  hiddenHeader?: boolean;
   cell: (item: InvoiceListItem, today: string) => ReactNode;
 }
 
-/** Red past the date, amber within `DUE_SOON_DAYS`; the label is for screen readers. */
-function DateChip({
-  date,
-  state,
-  label,
-}: {
-  date: string;
-  state: 'passed' | 'soon' | null;
-  label: { passed: string; soon: string };
-}) {
+const dash = <span className="text-muted">—</span>;
+
+function DateCell({ date, today }: { date: string | null; today: string }) {
+  if (date === null) return dash;
+  return <span className="tabular whitespace-nowrap">{formatDay(date, today)}</span>;
+}
+
+/** Red once the dispute window has closed, amber within 3 days (SPEC §8); for invoices to review. */
+function disputeTone(item: InvoiceListItem, today: string): Tone {
+  if (item.disputeDeadline === null || item.status !== 'needs_review') return null;
+  const urgency = dateUrgency(item.disputeDeadline, today, DISPUTE_SOON_DAYS);
+  return urgency === 'passed' ? 'warning' : urgency === 'soon' ? 'caution' : null;
+}
+
+function VendorCell({ item }: { item: InvoiceListItem }) {
+  if (item.status === 'processing') return <Reading />;
+  const name = item.vendor?.name ?? item.vendorName;
+  if (name !== null) return <TruncatedText text={name} lines={2} className="font-medium" />;
   return (
-    <span
-      className={cn(
-        'inline-block rounded px-1 -mx-1 whitespace-nowrap',
-        state === 'passed' && 'bg-destructive/12 font-medium text-destructive',
-        state === 'soon' && 'bg-attention/25 font-medium text-foreground',
-      )}
-    >
-      {formatDate(date)}
-      {state !== null && <span className="sr-only"> ({label[state]})</span>}
+    <span className="text-muted">
+      {item.extractionStatus === 'failed' ? "Couldn't read the PDF" : '—'}
     </span>
   );
 }
 
-const DERIVED_HINT: Record<string, string> = {
-  terms: 'Computed from the payment terms on the invoice',
-  vendor_default: "Computed from the vendor's default payment terms",
-};
-
-function VendorCell({ item, showStatus }: { item: InvoiceListItem; showStatus: boolean }) {
-  const name = item.vendor?.name ?? item.vendorName;
-  const isNew = item.vendor === null && name !== null;
-  const processing = item.status === 'processing';
-  return (
-    <div className="flex min-w-0 flex-col items-start gap-1">
-      {name !== null ? (
-        <TruncatedText text={name} lines={2} className="max-w-full font-medium" />
-      ) : item.extractionStatus === 'failed' ? (
-        <span className="text-destructive">Extraction failed</span>
-      ) : !processing ? (
-        <span className="text-muted-foreground">—</span>
-      ) : null}
-      {(isNew || processing || showStatus) && (
-        <div className="flex flex-wrap items-center gap-1">
-          {processing ? (
-            <Badge variant="secondary">
-              <Loader2 className="animate-spin" aria-hidden />
-              Processing…
-            </Badge>
-          ) : (
-            showStatus && (
-              <InvoiceStatusBadge status={item.status} extractionStatus={item.extractionStatus} />
-            )
-          )}
-          {isNew && (
-            <Badge
-              variant="outline"
-              className="h-4 px-1 text-[0.625rem] uppercase"
-              title="No vendor on file matches this name"
-            >
-              New
-            </Badge>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const COLUMNS: Record<string, Column> = {
+const COLUMNS: Record<Column['id'], Column> = {
   received: {
     id: 'received',
     header: 'Received',
-    width: 'w-[6rem]',
-    sortKey: 'received',
-    cell: (item) => {
-      const { date, time } = formatTimestampParts(item.receivedAt);
+    width: 6.75,
+    sortable: true,
+    cell: (item, today) => {
+      const { day, time } = formatTimestampParts(item.receivedAt, today);
       return (
-        <>
-          <span className="block whitespace-nowrap">{date}</span>
-          <span className="block text-xs text-muted-foreground tabular-nums">{time}</span>
-        </>
+        <span className="tabular block whitespace-nowrap">
+          {day}
+          <span className="block text-xs text-muted">{time}</span>
+        </span>
       );
     },
   },
-  vendor: { id: 'vendor', header: 'Vendor', cell: () => null }, // rendered with the tab's options
+  vendor: { id: 'vendor', header: 'Vendor', cell: (item) => <VendorCell item={item} /> },
+  status: {
+    id: 'status',
+    header: 'Status',
+    width: 6.5,
+    cell: (item) => <StatusWord status={item.status} />,
+  },
   invoiceNumber: {
     id: 'invoiceNumber',
     header: 'Invoice #',
-    width: 'w-[6.5rem]',
+    width: 8.5,
     cell: (item) =>
       item.invoiceNumber === null ? (
-        <span className="text-muted-foreground">—</span>
+        dash
       ) : (
-        <TruncatedText text={item.invoiceNumber} className="font-mono text-xs" />
+        <TruncatedText text={item.invoiceNumber} className="font-mono" />
       ),
   },
   invoiceDate: {
     id: 'invoiceDate',
     header: 'Invoice date',
-    width: 'w-[6rem]',
-    sortKey: 'invoiceDate',
-    cell: (item) => <span className="whitespace-nowrap">{formatDate(item.invoiceDate)}</span>,
+    width: 6.75,
+    sortable: true,
+    cell: (item, today) => <DateCell date={item.invoiceDate} today={today} />,
   },
   dueDate: {
     id: 'dueDate',
-    header: 'Due date',
-    width: 'w-[6rem]',
-    sortKey: 'dueDate',
-    cell: (item) => {
-      if (item.dueDate === null) return <span className="text-muted-foreground">—</span>;
-      const hint = item.dueDateSource === null ? undefined : DERIVED_HINT[item.dueDateSource];
+    header: 'Due',
+    width: 8.25,
+    sortable: true,
+    cell: (item, today) => {
+      if (item.dueDate === null) return dash;
+      const { text, tone } = dueCell(item.dueDate, today, item.status === 'unpaid');
       return (
-        <>
-          <DateChip
-            date={item.dueDate}
-            state={
-              item.dueState === 'overdue' ? 'passed' : item.dueState === 'soon' ? 'soon' : null
-            }
-            label={{ passed: 'overdue', soon: 'due soon' }}
-          />
-          {hint !== undefined && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="block w-fit text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
-                  derived
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{hint}</TooltipContent>
-            </Tooltip>
-          )}
-        </>
+        <ToneText
+          text={text}
+          tone={tone}
+          srHint={tone === 'warning' ? `due ${formatDate(item.dueDate)}` : undefined}
+          className="tabular whitespace-nowrap"
+        />
       );
     },
   },
   disputeDeadline: {
     id: 'disputeDeadline',
     header: 'Dispute by',
-    width: 'w-[6rem]',
-    sortKey: 'disputeDeadline',
+    width: 6.75,
+    sortable: true,
     cell: (item, today) =>
       item.disputeDeadline === null ? (
-        <span className="text-muted-foreground">—</span>
+        dash
       ) : (
-        <DateChip
-          date={item.disputeDeadline}
-          state={dateUrgency(item.disputeDeadline, today, DUE_SOON_DAYS)}
-          label={{ passed: 'dispute window over', soon: 'dispute window ends soon' }}
+        <ToneText
+          text={formatDay(item.disputeDeadline, today)}
+          tone={disputeTone(item, today)}
+          className="tabular whitespace-nowrap"
         />
       ),
   },
   amountDue: {
     id: 'amountDue',
     header: 'Amount due',
-    width: 'w-[7rem]',
-    sortKey: 'amountDue',
-    align: 'right',
+    width: 8.75,
+    sortable: true,
+    align: 'end',
     cell: (item) =>
       item.amountDue === null ? (
-        <span className="text-muted-foreground">—</span>
+        dash
       ) : (
-        <>
-          <span className="font-medium whitespace-nowrap tabular-nums">
-            {formatMoney(item.amountDue)}
-          </span>{' '}
-          <span className="text-xs text-muted-foreground">{item.amountDueCurrency ?? ''}</span>
-        </>
+        <span className="tabular whitespace-nowrap">
+          {formatMoney(item.amountDue)}{' '}
+          <span className="text-xs text-muted">{item.amountDueCurrency ?? ''}</span>
+        </span>
       ),
-  },
-  category: {
-    id: 'category',
-    header: 'Category',
-    width: 'w-[5.5rem]',
-    cell: (item) =>
-      item.category === null ? (
-        <span className="text-muted-foreground">—</span>
-      ) : (
-        <TruncatedText text={CATEGORY_LABELS[item.category]} />
-      ),
-  },
-  location: {
-    id: 'location',
-    header: 'Location',
-    width: 'w-[3.75rem]',
-    cell: (item) => {
-      const location = item.airportIata ?? item.locationText;
-      return location === null ? (
-        <span className="text-muted-foreground">—</span>
-      ) : (
-        <TruncatedText text={location} className={cn(item.airportIata && 'font-mono text-xs')} />
-      );
-    },
   },
   paidAt: {
     id: 'paidAt',
     header: 'Paid on',
-    width: 'w-[6rem]',
-    sortKey: 'paidAt',
-    cell: (item) => <span className="whitespace-nowrap">{formatDate(item.paidAt)}</span>,
+    width: 6.75,
+    sortable: true,
+    cell: (item, today) => <DateCell date={item.paidAt} today={today} />,
+  },
+  category: {
+    id: 'category',
+    header: 'Category',
+    width: 8.25,
+    cell: (item) =>
+      item.category === null ? dash : <TruncatedText text={CATEGORY_LABELS[item.category]} />,
+  },
+  location: {
+    id: 'location',
+    header: 'Location',
+    width: 4.5,
+    cell: (item) => {
+      const location = item.airportIata ?? item.locationText;
+      return location === null ? dash : <TruncatedText text={location} />;
+    },
   },
   flags: {
     id: 'flags',
     header: 'Flags',
-    width: 'w-[5rem]',
-    cell: (item) => <FlagCounts flags={item.flags} />,
+    hiddenHeader: true,
+    width: 2.75,
+    cell: (item) => <FlagIcon flags={item.flags} />,
   },
 };
 
-/** Columns per tab (T05 §2): the review tab adds the dispute deadline, the paid tab "Paid on". */
+/** The vendor column never gets narrower than this (rem); it takes whatever else is left. */
+const VENDOR_MIN_WIDTH = 9;
+
+/** Columns per tab: To review adds the dispute deadline, Paid "Paid on", All a Status column. */
 function columnsFor(status: InvoiceListStatus): Column[] {
-  const ids = [
+  const ids: Column['id'][] = [
     'received',
     'vendor',
+    ...(status === 'all' ? (['status'] as const) : []),
     'invoiceNumber',
     'invoiceDate',
     'dueDate',
-    ...(status === 'needs_review' ? ['disputeDeadline'] : []),
+    ...(status === 'needs_review' ? (['disputeDeadline'] as const) : []),
     'amountDue',
-    ...(status === 'paid' ? ['paidAt'] : []),
+    ...(status === 'paid' ? (['paidAt'] as const) : []),
     'category',
     'location',
     'flags',
   ];
-  return ids.map((id) => COLUMNS[id]).filter((column): column is Column => !!column);
-}
-
-function SortHeader({
-  column,
-  sort,
-  onSort,
-}: {
-  column: Column & { sortKey: InvoiceSortKey };
-  sort: { sort: InvoiceSortKey; order: SortOrder };
-  onSort: (key: InvoiceSortKey) => void;
-}) {
-  const active = sort.sort === column.sortKey;
-  const Icon = !active ? ChevronsUpDown : sort.order === 'asc' ? ArrowUp : ArrowDown;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(column.sortKey)}
-      className={cn(
-        'inline-flex items-center gap-1 rounded text-left hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-        column.align === 'right' && 'flex-row-reverse text-right',
-        active && 'text-foreground',
-      )}
-    >
-      {column.header}
-      <Icon className={cn('size-3.5', !active && 'opacity-40')} aria-hidden />
-    </button>
-  );
-}
-
-function SkeletonRows({ columns }: { columns: Column[] }) {
-  return Array.from({ length: 6 }, (_, row) => (
-    <TableRow key={row} aria-hidden>
-      {columns.map((column) => (
-        <TableCell key={column.id}>
-          <div className="h-4 w-4/5 animate-pulse rounded bg-muted" />
-        </TableCell>
-      ))}
-    </TableRow>
-  ));
+  return ids.map((id) => COLUMNS[id]);
 }
 
 export function InvoicesTable({
@@ -316,9 +222,9 @@ export function InvoicesTable({
   sort: { sort: InvoiceSortKey; order: SortOrder };
   onSort: (key: InvoiceSortKey) => void;
   onOpen: (id: string) => void;
-  /** Business day (Tbilisi), for the dispute-deadline colours. */
+  /** Business day (Tbilisi), for relative dates and their colours. */
   today: string;
-  /** First load: skeleton rows. */
+  /** First load: a spinner instead of rows. */
   loading: boolean;
   /** Showing the previous result while the next one loads. */
   stale: boolean;
@@ -326,95 +232,81 @@ export function InvoicesTable({
   empty: ReactNode;
 }) {
   const columns = columnsFor(status);
+  // Below this the table scrolls inside its panel instead of squeezing the vendor out.
+  const minWidth = columns.reduce((sum, column) => sum + (column.width ?? VENDOR_MIN_WIDTH), 0);
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <Table
-        className={cn(
-          'min-w-[59rem] table-fixed text-[0.8125rem]',
-          stale && 'opacity-60 transition-opacity',
-        )}
+    <TablePanel className={cn(stale && 'opacity-60 transition-opacity')}>
+      <Table.Content
+        aria-label="Invoices"
         aria-busy={loading || stale}
+        style={{ minWidth: `${String(minWidth)}rem` }}
+        className="table-fixed [&_td]:px-3 [&_th]:px-3"
+        sortDescriptor={{
+          column: sort.sort,
+          direction: sort.order === 'asc' ? 'ascending' : 'descending',
+        }}
+        onSortChange={(descriptor) => {
+          const column = columns.find((c) => c.id === descriptor.column);
+          if (column?.sortable) onSort(column.id as InvoiceSortKey);
+        }}
+        onRowAction={(key) => onOpen(String(key))}
       >
-        <colgroup>
-          {columns.map((column) => (
-            <col key={column.id} className={column.width} />
-          ))}
-        </colgroup>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            {columns.map((column) => (
-              <TableHead
-                key={column.id}
-                className={cn(
-                  'px-1.5 text-xs leading-tight whitespace-normal first:pl-3 last:pr-3',
-                  column.align === 'right' && 'text-right',
-                )}
-                aria-sort={
-                  column.sortKey === undefined
-                    ? undefined
-                    : sort.sort === column.sortKey
-                      ? sort.order === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                }
-              >
-                {column.sortKey === undefined ? (
-                  column.header
-                ) : (
-                  <SortHeader
-                    column={{ ...column, sortKey: column.sortKey }}
-                    sort={sort}
-                    onSort={onSort}
-                  />
-                )}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? (
-            <SkeletonRows columns={columns} />
-          ) : items.length === 0 ? (
-            <TableRow className="hover:bg-transparent">
-              <TableCell
-                colSpan={columns.length}
-                className="py-12 text-center whitespace-normal text-muted-foreground"
-              >
-                {empty}
-              </TableCell>
-            </TableRow>
-          ) : (
-            items.map((item) => (
-              <TableRow
-                key={item.id}
-                tabIndex={0}
-                onClick={() => onOpen(item.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(item.id);
-                }}
-                className="cursor-pointer align-top focus-visible:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-              >
-                {columns.map((column) => (
-                  <TableCell
-                    key={column.id}
+        {/*
+         * The columns change with the tab while the previous rows stay on screen: `dependencies`
+         * makes React Aria re-render its cached rows instead of mixing old cells with new columns.
+         */}
+        <Table.Header columns={columns} dependencies={[columns]}>
+          {(column) => (
+            <Table.Column
+              id={column.id}
+              isRowHeader={column.id === 'vendor'}
+              allowsSorting={column.sortable}
+              style={
+                column.width === undefined ? undefined : { width: `${String(column.width)}rem` }
+              }
+              className={cn(column.align === 'end' && 'text-end')}
+            >
+              {({ sortDirection }) =>
+                column.hiddenHeader ? (
+                  <span className="sr-only">{column.header}</span>
+                ) : column.sortable ? (
+                  <Table.SortableColumnHeader
+                    sortDirection={sortDirection}
                     className={cn(
-                      'px-1.5 py-2.5 whitespace-normal first:pl-3 last:pr-3',
-                      column.align === 'right' && 'text-right',
+                      'gap-1',
+                      column.align === 'end' ? 'justify-end' : 'justify-start',
                     )}
                   >
-                    {column.id === 'vendor' ? (
-                      <VendorCell item={item} showStatus={status === 'all'} />
-                    ) : (
-                      column.cell(item, today)
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
+                    {column.header}
+                  </Table.SortableColumnHeader>
+                ) : (
+                  column.header
+                )
+              }
+            </Table.Column>
           )}
-        </TableBody>
-      </Table>
-    </div>
+        </Table.Header>
+        <Table.Body
+          items={items}
+          dependencies={[columns, today]}
+          renderEmptyState={() => <TableEmpty loading={loading}>{empty}</TableEmpty>}
+        >
+          {(item) => (
+            <Table.Row
+              id={item.id}
+              columns={columns}
+              dependencies={[columns, today]}
+              className="cursor-pointer align-top"
+            >
+              {(column) => (
+                <Table.Cell className={cn(column.align === 'end' && 'text-end')}>
+                  {column.cell(item, today)}
+                </Table.Cell>
+              )}
+            </Table.Row>
+          )}
+        </Table.Body>
+      </Table.Content>
+    </TablePanel>
   );
 }

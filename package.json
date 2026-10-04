@@ -19,7 +19,8 @@
     "db:migrate:dev": "pnpm --filter @camex/api db:migrate:dev",
     "create-admin": "pnpm --filter @camex/api create-admin",
     "simulate:mailgun": "pnpm --filter @camex/api simulate:mailgun",
-    "eval:extraction": "pnpm --filter @camex/api eval:extraction"
+    "eval:extraction": "pnpm --filter @camex/api eval:extraction",
+    "seed:demo": "pnpm --filter @camex/api seed:demo"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

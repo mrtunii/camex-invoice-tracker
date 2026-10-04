@@ -138,7 +138,7 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 | rejected | needs_review | Reopen | |
 
 - Fields are editable only in `needs_review`. Each save writes an `edited` event with a diff.
-- **Overdue** = `unpaid` and due_date < today (Tbilisi). Not a status. **Due soon** = within 3 days.
+- **Overdue** = `unpaid` and due_date < today (Tbilisi). Not a status. **Due soon** = `unpaid` and due today … today + 7 days (one window everywhere: `dueState: soon`, the list's This week filter, Home). Dispute deadlines keep their own 3 days (DISPUTE_SOON, §8).
 - Transitions live in one server-side state machine module, not scattered in controllers. Every transition writes an event.
 
 ## 7. Extraction
@@ -209,23 +209,42 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 
 ## 10. UI
 
-**Invoices list `/invoices`**
-- Status tabs with counts: Needs review · Unpaid · Paid · Rejected · All. Rows still `processing` appear in Needs review with a "Processing…" badge.
-- Summary strip: unpaid totals grouped by currency (never converted) · overdue count · due in next 7 days.
-- Columns: received, vendor, invoice #, invoice date, due date (red overdue, amber due soon), amount due + currency, category, location, flags (counts by severity).
-- Default sort: Needs review → dispute_deadline asc, then received asc · Unpaid → due_date asc · Paid → paid_at desc · Rejected, All → received desc. Nulls sort last; ties break by received, then id (stable pages).
-- Filters: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range, has errors, due (overdue / next 7 days, from the summary links). CSV export of the current tab, filter and sort (UTF-8 with BOM, at most 10,000 rows). Upload button (drag & drop).
-- Tab, filters, sort and page live in the URL. API: `GET /api/invoices`, `GET /api/invoices/summary`, `GET /api/invoices/export.csv` (T05).
+HeroUI v3 (React Aria + Tailwind v4) with one design system; details and examples in [T05b](tasks/T05b-ui-overhaul.md).
 
-**Invoice detail `/invoices/:id` — split view**
+**Design principles ("dark cockpit")**
+- When nothing is wrong, nothing is coloured. Red = warning, act now (overdue, dispute window passed, error flags) · amber = caution, act soon (due within 7 days, dispute window within 3 days, warning flags) · green = done (paid: a dot or the word, never a filled block) · cyan-blue = selected / action (primary buttons, links, focus, active tab and nav item). Everything else is neutral.
+- Tokens (canvas, surface, ink, muted, line, primary, warning, caution, ok; light and dark) map onto HeroUI's CSS variables. Theme: Light / Dark / System (default) in the user menu.
+- Atkinson Hyperlegible Next everywhere, tabular figures for amounts and dates; Atkinson Hyperlegible Mono only for identifiers (invoice numbers, IBAN, account numbers, SWIFT, flight numbers, registrations). Sentence case; no all-caps labels.
+- 6 px corners for inputs and buttons, 10 px for panels and tables; panels separate from the canvas by contrast and a 1 px line, shadows only on overlays.
+- **Badges:** lists show no pills, chips or badges (exceptions: removable tags in tag inputs; the count in a tab label, as plain muted text). Status in lists: the tab says it; the All tab has a Status column (6 px dot + word). Flags in lists: at most one icon per row (red with any error flag, else amber with any warning; info never), its tooltip lists the messages; flag codes never appear in the UI (API and CSV only). Urgency is coloured text on the date ("Overdue 3 days", "Due Fri 9 Oct"). Unmatched vendors show just the extracted name. Processing: a small spinner and "Reading…".
+- **Words:** `needs_review` = "To review", `unpaid` = "To pay", `paid` = "Paid", `rejected` = "Rejected". Close dates are relative ("Tomorrow", "Fri 9 Oct", "Overdue 3 days"), else "16 Sep 2026". Amounts are "15,617.79 USD" (amount, then code, never a symbol), never added across currencies. Empty states say what to do.
+
+**Layout:** a 224 px sidebar (icons only below 1024 px, a drawer below 640 px): Home, Invoices, Inbox, Vendors; at the bottom Team and the user menu (theme, change password, sign out). Content left-aligned, at most 1280 px. Page header: the title and at most one primary action. Each page is its own lazily loaded chunk.
+
+**Home `/`** (`GET /api/dashboard?month&currency`)
+- The status sentence (30 px, the one bold element), built from the data, only clauses with something to say: invoices to review and the most urgent dispute deadline (within 3 days); overdue payments, else payments due this week; extraction failures. "Nothing needs attention." otherwise. Numbers link to the matching list.
+- To review / To pay panels: up to 5 rows in the list's default order (vendor, amount, one line of why) and View all.
+- Month ledger (month picker, default this month in Tbilisi), one column per currency, amount and count: Invoiced (`unpaid`/`paid`, invoice_date in the month) · Paid (`paid`, paid_at in the month) · To pay (the month's invoiced still `unpaid`) · To review (`needs_review`, invoice_date in the month).
+- Last 12 months: invoiced and paid per month for one currency (default: most invoiced in the period), Recharts bars with a hidden table. By category / Top vendors: top 5 of the month's invoiced in that currency. Every sum in SQL.
+
+**Invoices list `/invoices`**
+- Tabs with counts: To review (also holds `processing`) · To pay · Paid · Rejected · All.
+- Filters on one row: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range, Errors only (behind a Filters popover on narrow screens). To pay: All · Overdue · This week (the API's `due` filter). Above the table one quiet line of totals for the tab and filters ("8 invoices · 35,153.08 USD · 88,753.98 GEL"). CSV export of the current tab, filter and sort (UTF-8 with BOM, at most 10,000 rows). Upload PDFs (drag & drop).
+- Columns: received, vendor, invoice #, invoice date, due (red overdue, amber due soon), amount due + currency, category, location, flag icon; plus dispute by (To review), paid on (Paid), status (All). Sortable headers, pagination.
+- Default sort: To review → dispute_deadline asc, then received asc · To pay → due_date asc · Paid → paid_at desc · Rejected, All → received desc. Nulls sort last; ties break by received, then id (stable pages).
+- Tab, filters, sort and page live in the URL. API: `GET /api/invoices`, `GET /api/invoices/summary` (tab counts), `GET /api/invoices/export.csv`.
+
+**Invoice detail `/invoices/:id` — split view** (T06; until then an interim page with the essentials and Open PDF)
 - Left (~55%, resizable): PDF via pdf.js/react-pdf; page nav, zoom, fit width, download, open in new tab.
-- Right: header (vendor, invoice #, status badge, amount due prominent) · flags panel (errors first; field-linked flags focus that field on click) · form sections: Document · Dates & terms · Amounts · Operation · Line items (editable table) · Bank details · Notes. Read-only outside `needs_review`. Fields that differ from the extraction show an "edited" marker.
+- Right: header (vendor, invoice #, status, amount due prominent) · flags panel (errors first; field-linked flags focus that field on click) · form sections: Document · Dates & terms · Amounts · Operation · Line items (editable table) · Bank details · Notes. Read-only outside `needs_review`. Fields that differ from the extraction show an "edited" marker.
 - Sticky action bar by status: needs_review → Save, Approve, Approve & next, Reject, Re-extract · unpaid → Mark paid, Reopen · paid → Undo payment · rejected → Reopen.
 - Below: Source email (from, subject, received, body, ignored attachments) and Activity timeline.
 
-**Inbox `/inbox`** — log of inbound emails: received, from, subject, PDF count, links to resulting invoices, ignored attachments.
+**Inbox `/inbox`** — log of inbound emails: received, from, subject, links to resulting invoices (file name, status word, flag icon), ignored attachments; the email opens in a drawer.
 
-**Vendors `/vendors`**, **Users `/users`**.
+**Vendors `/vendors`** — table; a drawer to edit name, aliases and domains (tag inputs) and default terms, and to view or remove trusted bank accounts (remove asks first). **Team `/team`** (the users of §11) — table; add a person, reset a password, deactivate.
+
+**Login and set password** — a centred form on the canvas with the Camex Invoices wordmark in type.
 
 ## 11. Auth and users
 
@@ -255,6 +274,7 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 | T03 | Extraction: extractor interface + provider, prompt v1, mapping/normalization, eval + golden files | all fixtures pass eval |
 | T04 | Validation + vendors: flag engine, derived dates, dedupe, vendor matching, bank checks, Vendors page | flags correct on fixtures and crafted cases |
 | T05 | Invoices list: tabs, filters, totals, CSV, upload | |
+| T05b | UI overhaul on HeroUI v3 ("dark cockpit" design system) + Home with the dashboard API | every screen on HeroUI v3, Home from real data |
 | T06 | Detail split view + state machine + actions + audit trail | full review → paid loop works |
 | T07 | Deploy: Dockerfiles + Dokploy runbook | staging live |
 

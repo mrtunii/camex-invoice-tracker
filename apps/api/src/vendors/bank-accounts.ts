@@ -43,10 +43,10 @@ export function activeAccountKeys(accounts: readonly StoredBankAccount[]): strin
   });
 }
 
-/** A new trusted account copied from an invoice's bank details. */
+/** A new trusted account copied from an invoice's bank details (`userId` null: no user, e.g. seeded). */
 export function trustedAccountFrom(
   details: BankDetails,
-  source: { invoiceId: string; userId: string; at: Date },
+  source: { invoiceId: string; userId: string | null; at: Date },
 ): StoredBankAccount {
   return {
     id: randomUUID(),

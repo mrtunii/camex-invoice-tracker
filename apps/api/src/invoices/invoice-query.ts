@@ -1,7 +1,7 @@
 import {
   DEFAULT_INVOICE_SORT,
   DEFAULT_SORT_ORDER,
-  DUE_NEXT_DAYS,
+  DUE_SOON_DAYS,
   type InvoiceFilters,
   type InvoiceListStatus,
   type InvoiceSortKey,
@@ -10,8 +10,8 @@ import {
 } from '@camex/shared';
 import { Prisma } from '../generated/prisma/client.js';
 
-// SQL for the invoices list, summary and CSV export (T05). Every query reads the same FROM, so
-// the filters mean the same thing everywhere. Values are always bound parameters; the only
+// SQL for the invoices list, summary and CSV export (T05) and Home (T05b). Every query reads the
+// same FROM, so the filters mean the same thing everywhere. Values are always bound parameters; the only
 // interpolated SQL comes from the fixed tables below.
 
 /** `i` = invoices, `v` = the linked vendor (nullable), `e` = the email that carried the PDF. */
@@ -69,7 +69,7 @@ export function filterConditions(filters: InvoiceFilters, today: string): Prisma
     conditions.push(Prisma.sql`(i.status = 'unpaid' AND i.due_date < ${today}::date)`);
   } else if (filters.due === 'soon') {
     conditions.push(
-      Prisma.sql`(i.status = 'unpaid' AND i.due_date BETWEEN ${today}::date AND ${addDays(today, DUE_NEXT_DAYS)}::date)`,
+      Prisma.sql`(i.status = 'unpaid' AND i.due_date BETWEEN ${today}::date AND ${addDays(today, DUE_SOON_DAYS)}::date)`,
     );
   }
   return conditions;
@@ -127,4 +127,16 @@ export function orderByClause({ sort, order }: ResolvedSort): Prisma.Sql {
       ? [Prisma.sql`e.received_at ${dir}`]
       : [Prisma.sql`${SORT_COLUMN[sort]} ${dir} NULLS LAST`, Prisma.sql`e.received_at ${dir}`];
   return Prisma.sql`ORDER BY ${Prisma.join([...keys, Prisma.sql`i.id ${dir}`], ', ')}`;
+}
+
+/** `rows` in the order of `ids` (a row deleted in between is skipped). */
+export function inIdOrder<T extends { id: string }>(
+  ids: readonly string[],
+  rows: readonly T[],
+): T[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.flatMap((id) => {
+    const row = byId.get(id);
+    return row === undefined ? [] : [row];
+  });
 }

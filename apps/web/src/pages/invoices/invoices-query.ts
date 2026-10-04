@@ -5,7 +5,7 @@ import {
   invoiceSummarySchema,
 } from '@camex/shared';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@heroui/react';
 import { api, apiDownload } from '@/lib/api';
 import {
   type ListFilters,
@@ -57,6 +57,6 @@ export function useExportCsv() {
   return useMutation({
     mutationFn: (params: ListParams) => apiDownload(exportApiPath(params)),
     onSuccess: (fileName) => toast.success(`Downloaded ${fileName}`),
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.danger(error.message),
   });
 }
