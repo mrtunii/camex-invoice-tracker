@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isoTimestampSchema, uuidSchema } from './common.js';
-import { extractionStatusSchema, invoiceStatusSchema } from './invoices.js';
+import { extractionStatusSchema, invoiceFlagSchema, invoiceStatusSchema } from './invoices.js';
 
 export const inboundProviderSchema = z.enum(['mailgun', 'manual']);
 export type InboundProvider = z.infer<typeof inboundProviderSchema>;
@@ -19,6 +19,8 @@ export const inboxInvoiceSchema = z.object({
   status: invoiceStatusSchema,
   extractionStatus: extractionStatusSchema,
   fileName: z.string(),
+  /** Codes and severities only, for the counts on the Inbox chip. */
+  flags: z.array(invoiceFlagSchema.pick({ code: true, severity: true })),
 });
 export type InboxInvoice = z.infer<typeof inboxInvoiceSchema>;
 

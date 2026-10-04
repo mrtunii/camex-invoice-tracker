@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InvoiceEvaluator } from '../evaluation/invoice-evaluator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { failExtraction } from './extraction-failure.js';
 import { ExtractionQueue } from './extraction-queue.js';
@@ -30,6 +31,7 @@ export class RecoverySweep {
   constructor(
     private readonly prisma: PrismaService,
     private readonly queue: ExtractionQueue,
+    private readonly evaluator: InvoiceEvaluator,
   ) {}
 
   async run(now = new Date()): Promise<SweepResult> {
@@ -42,7 +44,10 @@ export class RecoverySweep {
         event: { retryable: false },
         unchangedSince: giveUpBefore,
       });
-      if (applied) failed.push(id);
+      if (applied) {
+        failed.push(id);
+        await this.evaluator.tryEvaluateWithRelated(id);
+      }
     }
 
     // The expired ones are no longer processing, so this is the 10–60 minute window.

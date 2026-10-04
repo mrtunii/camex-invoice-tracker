@@ -10,8 +10,10 @@ import {
   lineItemsFromJson,
 } from './invoice-columns.js';
 
+export type InvoiceWithVendor = Invoice & { vendor: { id: string; name: string } | null };
+
 /** Row → API DTO: camelCase, decimals as strings, dates 'YYYY-MM-DD', no raw model output. */
-export function toInvoiceDetail(row: Invoice): InvoiceDetail {
+export function toInvoiceDetail(row: InvoiceWithVendor): InvoiceDetail {
   return {
     id: row.id,
     inboundEmailId: row.inboundEmailId,
@@ -29,6 +31,7 @@ export function toInvoiceDetail(row: Invoice): InvoiceDetail {
 
     documentType: row.documentType,
     vendorId: row.vendorId,
+    vendor: row.vendor,
     vendorName: row.vendorName,
     vendorTaxId: row.vendorTaxId,
     billToName: row.billToName,
@@ -36,6 +39,7 @@ export function toInvoiceDetail(row: Invoice): InvoiceDetail {
     invoiceDate: fromDateColumn(row.invoiceDate),
     serviceDate: fromDateColumn(row.serviceDate),
     dueDate: fromDateColumn(row.dueDate),
+    dueDateSource: row.dueDateSource,
     disputeDeadline: fromDateColumn(row.disputeDeadline),
     paymentTermsText: row.paymentTermsText,
     paymentTermsDays: row.paymentTermsDays,
@@ -68,7 +72,10 @@ export class InvoicesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async get(id: string): Promise<InvoiceDetail> {
-    const row = await this.prisma.invoice.findUnique({ where: { id } });
+    const row = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { vendor: { select: { id: true, name: true } } },
+    });
     if (!row) throw new NotFoundException('Invoice not found');
     return toInvoiceDetail(row);
   }

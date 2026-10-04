@@ -1,4 +1,4 @@
-import type { BankDetails, ExtractedInvoice } from '@camex/shared';
+import { type BankDetails, type ExtractedInvoice, vendorKey } from '@camex/shared';
 
 // Scoring for `pnpm eval:extraction` (T03 §7): golden file vs normalized extraction.
 
@@ -90,24 +90,11 @@ export function decimalEquals(expected: string | null, actual: string | null): b
   return (canonicalDecimal(expected) ?? expected) === (canonicalDecimal(actual) ?? actual);
 }
 
-const LEGAL_SUFFIXES = new Set(['llc', 'ltd', 'limited', 'fze', 'gmbh', 'na', 'inc']);
-
-/** Lowercase, punctuation and legal suffixes removed, whitespace collapsed. */
-export function normalizeName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[.,'’"]/g, '') // N.A. → na, AEG's → aegs
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .split(' ')
-    .filter((word) => word !== '' && !LEGAL_SUFFIXES.has(word))
-    .join(' ');
-}
-
-/** Equal after normalizeName, or one contains the other as whole words. */
+/** Equal vendorKeys (the matcher's rule), or one key contains the other as whole words. */
 export function namesMatch(expected: string | null, actual: string | null): boolean {
   if (expected === null || actual === null) return expected === actual;
-  const a = normalizeName(expected);
-  const b = normalizeName(actual);
+  const a = vendorKey(expected);
+  const b = vendorKey(actual);
   if (a === '' || b === '') return a === b;
   return a === b || ` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `);
 }

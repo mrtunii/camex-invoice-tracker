@@ -58,6 +58,12 @@ pnpm eval:extraction --model claude-opus-5-5         # another model
 
 The normalized output of the last run is written to `fixtures/invoices/eval-out/` (gitignored). The prompt is `apps/api/src/extraction/prompts/extract-v1.ts`; any change to it gets a new version.
 
+## Flags and vendors
+
+After every extraction the invoice is evaluated (`apps/api/src/evaluation/`): it is matched to a vendor (name or alias, else the sender's email domain), its due date and dispute deadline are derived, and the validation flags of SPEC §8 are computed. `GET /api/invoices/:id` returns `vendor`, `dueDateSource`, `disputeDeadline` and `flags`; the Inbox shows flag counts per invoice.
+
+Vendors are managed on `/vendors` (or `/api/vendors`). Creating or changing a vendor re-evaluates the invoices it can affect, so pending invoices link as soon as their vendor exists. Bank accounts are trusted from an invoice (`POST /api/invoices/:id/trust-bank-details`; the review UI comes in T06) and removed on `/vendors`. Every open invoice is re-evaluated daily at 00:05 Asia/Tbilisi, because some flags depend on the date. `OWN_EMAIL_DOMAINS` (default `camex.aero`) lists Camex's own mail domains: they never identify a vendor.
+
 ## Everyday commands
 
 | Command                                               | What it does                                                                       |

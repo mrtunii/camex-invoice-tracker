@@ -1,6 +1,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module.js';
+import { ClockModule } from './clock/clock.module.js';
 import { EnvModule } from './config/env.module.js';
 import type { Env } from './config/env.js';
 import { HealthController } from './health/health.controller.js';
@@ -13,6 +14,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { spaModule } from './spa.js';
 import { StorageModule } from './storage/storage.module.js';
 import { UsersModule } from './users/users.module.js';
+import { VendorsModule } from './vendors/vendors.module.js';
 
 @Module({})
 export class AppModule {
@@ -22,6 +24,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         EnvModule.forRoot(env),
+        ClockModule,
         LoggerModule.forRoot(loggerParams(env)),
         PrismaModule,
         StorageModule,
@@ -31,6 +34,7 @@ export class AppModule {
         IngestionModule,
         InboxModule,
         InvoicesModule,
+        VendorsModule,
         ...(env.NODE_ENV === 'production' ? [spaModule(env)] : []),
       ],
       controllers: [HealthController],

@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/login-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { PlaceholderPage } from '@/pages/placeholder-page';
 import { UsersPage } from '@/pages/users/users-page';
+import { VendorsPage } from '@/pages/vendors/vendors-page';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -25,14 +26,7 @@ export const router = createBrowserRouter([
             ),
           },
           { path: 'inbox', element: <InboxPage /> },
-          {
-            path: 'vendors',
-            element: (
-              <PlaceholderPage title="Vendors">
-                Vendors, their payment terms and trusted bank accounts will be managed here.
-              </PlaceholderPage>
-            ),
-          },
+          { path: 'vendors', element: <VendorsPage /> },
           { path: 'users', element: <UsersPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ENV } from '../config/env.module.js';
 import type { Env } from '../config/env.js';
+import { EvaluationModule } from '../evaluation/evaluation.module.js';
 import { createAnthropicExtractor } from './anthropic/anthropic-extractor.js';
 import { ExtractionHandler } from './extraction.handler.js';
 import { ExtractionQueue } from './extraction-queue.js';
@@ -28,6 +29,7 @@ function createExtractor(env: Env): InvoiceExtractor {
 }
 
 @Module({
+  imports: [EvaluationModule],
   providers: [
     ExtractionQueue,
     ExtractionHandler,

@@ -42,14 +42,21 @@ const asmResult = (): ExtractionResult => ({
   durationMs: 8012,
 });
 
+/** needs_review and evaluated: with no vendors, every evaluated invoice has at least NEW_VENDOR. */
 async function waitForReview(t: TestApp, invoiceId: string, timeoutMs?: number) {
   return waitFor(
     async () => {
       const row = await t.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-      return row.status === 'needs_review' && row;
+      return (
+        row.status === 'needs_review' && Array.isArray(row.flags) && row.flags.length > 0 && row
+      );
     },
     { timeoutMs },
   );
+}
+
+function flagCodes(flags: unknown): string[] {
+  return (flags as { code: string }[]).map((flag) => flag.code);
 }
 
 async function eventsOf(t: TestApp, invoiceId: string) {
@@ -80,10 +87,7 @@ describe('extraction worker (pg-boss)', () => {
     const spy = vi.spyOn(extractor, 'extract');
     const invoiceId = await ingestOne(t);
 
-    const invoice = await waitFor(async () => {
-      const row = await t.prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-      return row.status === 'needs_review' && row;
-    });
+    const invoice = await waitForReview(t, invoiceId);
     expect(invoice).toMatchObject({
       extractionStatus: 'succeeded',
       extractionModel: 'stub',
@@ -97,8 +101,19 @@ describe('extraction worker (pg-boss)', () => {
       totalAmount: null,
       lineItems: [],
       bankDetails: null,
-      flags: [],
     });
+    // ...so T04's evaluation flags every required field.
+    expect(flagCodes(invoice.flags)).toEqual([
+      'MISSING_REQUIRED',
+      'MISSING_REQUIRED',
+      'MISSING_REQUIRED',
+      'MISSING_REQUIRED',
+      'MISSING_REQUIRED',
+      'MISSING_REQUIRED',
+      'NOT_BILLED_TO_CAMEX',
+      'NOT_AN_INVOICE',
+      'NEW_VENDOR',
+    ]);
 
     expect(spy).toHaveBeenCalledTimes(1);
     const input = spy.mock.calls[0]?.[0];
@@ -152,13 +167,15 @@ describe('extraction worker (pg-boss)', () => {
       amountDueCurrency: 'USD',
       notes: expect.stringMatching(/^Transfer fees/),
       vendorId: null,
-      disputeDeadline: null,
-      flags: [],
+      // printed on the invoice, so kept as printed (T04)
+      dueDateSource: 'printed',
     });
     // date columns
     expect(invoice.invoiceDate?.toISOString()).toBe('2026-09-16T00:00:00.000Z');
     expect(invoice.serviceDate?.toISOString()).toBe('2026-09-14T00:00:00.000Z');
     expect(invoice.dueDate?.toISOString()).toBe('2026-09-16T00:00:00.000Z');
+    // derived by T04's evaluation: invoice date + 14-day dispute window
+    expect(invoice.disputeDeadline?.toISOString()).toBe('2026-09-30T00:00:00.000Z');
     // numeric columns
     expect(invoice.totalAmount?.toFixed()).toBe('15617.79');
     expect(invoice.amountDue?.toFixed()).toBe('15617.79');
@@ -258,9 +275,13 @@ describe('extraction worker (pg-boss)', () => {
     expect(events.map((e) => e.type)).toEqual(['received', 'extraction_failed']);
     expect(events[1]?.data).toEqual({ error: 'model unavailable', attempts: 3 });
 
-    // pg-boss records the job itself as failed after its retries.
+    // pg-boss records the job itself as failed after its retries, once the handler has thrown
+    // (after the invoice is failed and evaluated, so a moment after needs_review).
     const boss = await t.app.get(JobsService).ready();
-    const jobs = await boss.findJobs(EXTRACT_QUEUE, { key: invoiceId });
+    const jobs = await waitFor(async () => {
+      const found = await boss.findJobs(EXTRACT_QUEUE, { key: invoiceId });
+      return found[0]?.state !== 'active' && found;
+    });
     expect(jobs.map((j) => [j.state, j.retryCount])).toEqual([['failed', 2]]);
   }, 30_000);
 

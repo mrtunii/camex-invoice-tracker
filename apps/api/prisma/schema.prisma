@@ -64,6 +64,16 @@ enum InvoiceCategory {
   @@map("invoice_category")
 }
 
+/// How invoices.due_date was set. `printed` and `manual` are kept; the others are re-derived.
+enum DueDateSource {
+  printed
+  terms
+  vendor_default
+  manual
+
+  @@map("due_date_source")
+}
+
 enum RejectionReason {
   duplicate
   not_invoice
@@ -169,7 +179,9 @@ model Vendor {
   aliases                 String[] @default([])
   emailDomains            String[] @default([]) @map("email_domains")
   defaultPaymentTermsDays Int?     @map("default_payment_terms_days")
-  /// [{beneficiary, bank_name, iban, account_number, swift, routing_number, currency, added_at, added_by_id}]
+  /// Trusted accounts: [{id, beneficiary, bank_name, iban, account_number, swift, routing_number,
+  /// currency, added_at, added_by_id, source_invoice_id, removed_at, removed_by_id}].
+  /// Removal is soft (removed_at set): matching ignores removed entries; they stay as the audit trail.
   bankAccounts            Json     @default("[]") @map("bank_accounts")
   createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -214,10 +226,11 @@ model Invoice {
   invoiceNumber String? @map("invoice_number")
 
   // dates
-  invoiceDate     DateTime? @map("invoice_date") @db.Date
-  serviceDate     DateTime? @map("service_date") @db.Date
-  dueDate         DateTime? @map("due_date") @db.Date
-  disputeDeadline DateTime? @map("dispute_deadline") @db.Date
+  invoiceDate     DateTime?      @map("invoice_date") @db.Date
+  serviceDate     DateTime?      @map("service_date") @db.Date
+  dueDate         DateTime?      @map("due_date") @db.Date
+  dueDateSource   DueDateSource? @map("due_date_source")
+  disputeDeadline DateTime?      @map("dispute_deadline") @db.Date
 
   // terms
   paymentTermsText  String? @map("payment_terms_text")

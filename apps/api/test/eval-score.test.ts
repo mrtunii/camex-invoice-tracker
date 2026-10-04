@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  decimalEquals,
-  namesMatch,
-  normalizeName,
-  scoreExtraction,
-} from '../src/extraction/eval/score.js';
+import { vendorKey } from '@camex/shared';
+import { decimalEquals, namesMatch, scoreExtraction } from '../src/extraction/eval/score.js';
 import { expectedExtraction } from './helpers.js';
 
 const aeg = expectedExtraction('aeg');
@@ -30,8 +26,9 @@ describe('eval scorer', () => {
   });
 
   it('names: case, punctuation and legal suffixes ignored; containment passes', () => {
-    expect(normalizeName('Wells Fargo Bank, N.A.')).toBe('wells fargo bank');
-    expect(normalizeName('AEG Fuels Ireland Limited')).toBe('aeg fuels ireland');
+    // The scorer uses the vendor matcher's key.
+    expect(vendorKey('Wells Fargo Bank, N.A.')).toBe('wells fargo bank');
+    expect(vendorKey('AEG Fuels Ireland Limited')).toBe('aeg fuels ireland');
     expect(namesMatch('Aviation Services Management FZE', 'AVIATION SERVICES MANAGEMENT')).toBe(
       true,
     );

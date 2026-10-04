@@ -100,7 +100,7 @@ export function bankDetailsFromJson(value: Prisma.JsonValue | null): BankDetails
   });
 }
 
-/** Every extracted field, as invoice columns. */
+/** Every extracted field, as invoice columns (plus the due date's source). */
 export function extractedInvoiceColumns(
   invoice: ExtractedInvoice,
 ): Prisma.InvoiceUpdateManyMutationInput {
@@ -112,7 +112,9 @@ export function extractedInvoiceColumns(
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: toDateColumn(invoice.invoiceDate),
     serviceDate: toDateColumn(invoice.serviceDate),
+    // A printed due date is kept as printed; without one, derivation fills both (T04 §4).
     dueDate: toDateColumn(invoice.dueDate),
+    dueDateSource: invoice.dueDate === null ? null : 'printed',
     paymentTermsText: invoice.paymentTermsText,
     paymentTermsDays: invoice.paymentTermsDays,
     disputeWindowDays: invoice.disputeWindowDays,

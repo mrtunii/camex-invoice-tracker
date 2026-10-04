@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoTimestampSchema, uuidSchema } from './common.js';
+import { isoTimestampSchema, namedRefSchema, uuidSchema } from './common.js';
 import {
   bankDetailsSchema,
   calendarDateSchema,
@@ -41,10 +41,44 @@ export const uploadRejectedSchema = z.object({
 });
 export type UploadRejected = z.infer<typeof uploadRejectedSchema>;
 
-/** SPEC §5 flags (computed from T04 on; always [] before that). */
+/** How invoices.due_date was set (SPEC §5, §7). Printed and manual dates are never re-derived. */
+export const dueDateSourceSchema = z.enum(['printed', 'terms', 'vendor_default', 'manual']);
+export type DueDateSource = z.infer<typeof dueDateSourceSchema>;
+
+/** SPEC §8 flag codes, in table order. */
+export const flagCodeSchema = z.enum([
+  'EXTRACTION_FAILED',
+  'MISSING_REQUIRED',
+  'TOTAL_MATH',
+  'LINE_MATH',
+  'DUE_BEFORE_INVOICE',
+  'TERMS_MISMATCH',
+  'DUE_DATE_DERIVED',
+  'FUTURE_DATE',
+  'SERVICE_AFTER_INVOICE',
+  'PAY_IN_OTHER_CURRENCY',
+  'NOT_BILLED_TO_CAMEX',
+  'NOT_AN_INVOICE',
+  'DUPLICATE_FILE',
+  'DUPLICATE_NUMBER',
+  'NEW_VENDOR',
+  'BANK_FIRST_SEEN',
+  'BANK_UNKNOWN',
+  'DISPUTE_SOON',
+]);
+export type FlagCode = z.infer<typeof flagCodeSchema>;
+
+export const flagSeveritySchema = z.enum(['error', 'warning', 'info']);
+export type FlagSeverity = z.infer<typeof flagSeveritySchema>;
+
+/**
+ * SPEC §5 flags, recomputed by the server. `field` is the camelCase path of the field the flag is
+ * about (`dueDate`, `lineItems.1.amount`, `bankDetails.iban`), or null. Messages are plain English
+ * and never contain bank account numbers.
+ */
 export const invoiceFlagSchema = z.object({
-  code: z.string(),
-  severity: z.enum(['error', 'warning', 'info']),
+  code: flagCodeSchema,
+  severity: flagSeveritySchema,
   field: z.string().nullable(),
   message: z.string(),
 });
@@ -71,6 +105,8 @@ export const invoiceDetailSchema = z.object({
 
   documentType: documentTypeSchema.nullable(),
   vendorId: uuidSchema.nullable(),
+  /** The linked vendor (SPEC §9), or null: NEW_VENDOR. */
+  vendor: namedRefSchema.nullable(),
   vendorName: z.string().nullable(),
   vendorTaxId: z.string().nullable(),
   billToName: z.string().nullable(),
@@ -78,6 +114,8 @@ export const invoiceDetailSchema = z.object({
   invoiceDate: calendarDateSchema.nullable(),
   serviceDate: calendarDateSchema.nullable(),
   dueDate: calendarDateSchema.nullable(),
+  dueDateSource: dueDateSourceSchema.nullable(),
+  /** invoice_date + dispute_window_days; always derived. */
   disputeDeadline: calendarDateSchema.nullable(),
   paymentTermsText: z.string().nullable(),
   paymentTermsDays: z.number().int().nullable(),

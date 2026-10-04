@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { emailSchema, newPasswordSchema, userNameSchema } from '@camex/shared';
+import { emailSchema, hostnameSchema, newPasswordSchema, userNameSchema } from '@camex/shared';
 import { z } from 'zod';
 import { EXTRACT_EXPIRE_SECONDS } from '../extraction/job-limits.js';
 
@@ -33,6 +33,15 @@ export const envObjectSchema = z.object({
   INBOUND_MAX_REQUEST_MB: z.coerce.number().int().min(1).max(200).default(30),
   INBOUND_MAX_FILE_MB: z.coerce.number().int().min(1).max(100).default(25),
   INBOUND_MAX_FILES: z.coerce.number().int().min(1).max(100).default(20),
+  /**
+   * Camex's own mail domains, comma-separated (subdomains included). Never used to match a vendor
+   * (forwarded mail can carry them) and refused as a vendor domain.
+   */
+  OWN_EMAIL_DOMAINS: z
+    .string()
+    .default('camex.aero')
+    .transform((value) => value.split(',').map((domain) => domain.trim()))
+    .pipe(z.array(hostnameSchema).min(1)),
 
   EXTRACTOR_PROVIDER: z.enum(['stub', 'anthropic']),
   /** Required when EXTRACTOR_PROVIDER=anthropic. */

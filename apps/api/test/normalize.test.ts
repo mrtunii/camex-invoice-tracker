@@ -55,6 +55,18 @@ describe('normalization (wire → domain)', () => {
     expect(decimal('1e5')).toBeNull();
   });
 
+  it('decimals: more than 14 integer digits (too big for numeric(18,4)) → null', () => {
+    expect(decimal('99999999999999.9999')).toBe('99999999999999.9999');
+    expect(decimal('-99999999999999')).toBe('-99999999999999');
+    expect(decimal('99,999,999,999,999.99')).toBe('99999999999999.99');
+    expect(decimal('100000000000000')).toBeNull();
+    expect(decimal('-123456789012345.5')).toBeNull();
+    expect(decimal('100,000,000,000,000')).toBeNull();
+    // Leading zeros don't count: the value still fits.
+    expect(decimal('000000000000000001.5')).toBe('000000000000000001.5');
+    expect(decimal('0.123456789012345678')).toBe('0.123456789012345678');
+  });
+
   it('day counts: integers or null', () => {
     expect(dayCount('30')).toBe(30);
     expect(dayCount('0')).toBe(0);

@@ -9,6 +9,8 @@ import type {
 // that doesn't survive its rule becomes null, so review sees an empty field, never a guess.
 
 const DECIMAL = /^-?\d+(\.\d+)?$/;
+/** numeric(18,4) holds 14 digits before the point; a longer value can't be stored. */
+const MAX_INTEGER_DIGITS = 14;
 /** 1,234 · 15,617.79 · -1,000,000.5 (commas only in thousands positions). */
 const THOUSANDS_COMMAS = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -44,12 +46,15 @@ export function calendarDate(value: string): string | null {
 /**
  * Decimal string as returned, never rounded. Spaces and thousands commas are stripped
  * defensively; a comma in any other position (a decimal comma) makes it null rather than
- * silently changing the value.
+ * silently changing the value. More than 14 integer digits (leading zeros aside) is null too:
+ * it wouldn't fit numeric(18,4), and review should see an empty field, not a failed write.
  */
 export function decimal(value: string): string | null {
   let compact = value.replace(SPACES, '');
   if (THOUSANDS_COMMAS.test(compact)) compact = compact.replaceAll(',', '');
-  return DECIMAL.test(compact) ? compact : null;
+  if (!DECIMAL.test(compact)) return null;
+  const integerDigits = (compact.replace(/^-/, '').split('.')[0] ?? '').replace(/^0+(?=\d)/, '');
+  return integerDigits.length > MAX_INTEGER_DIGITS ? null : compact;
 }
 
 export function dayCount(value: string): number | null {

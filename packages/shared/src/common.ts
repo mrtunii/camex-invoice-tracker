@@ -12,3 +12,7 @@ export const uuidSchema = z.uuid();
 
 /** ISO-8601 timestamp as serialized in JSON (e.g. created_at). */
 export const isoTimestampSchema = z.iso.datetime({ offset: true });
+
+/** Another record, by id and display name (a vendor, the user who did something). */
+export const namedRefSchema = z.object({ id: uuidSchema, name: z.string() });
+export type NamedRef = z.infer<typeof namedRefSchema>;

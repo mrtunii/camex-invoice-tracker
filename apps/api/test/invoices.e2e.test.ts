@@ -1,5 +1,6 @@
-import { invoiceDetailSchema } from '@camex/shared';
+import { type Clock, invoiceDetailSchema } from '@camex/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CLOCK } from '../src/clock/clock.module.js';
 import { ExtractionHandler } from '../src/extraction/extraction.handler.js';
 import { INVOICE_EXTRACTOR, type InvoiceExtractor } from '../src/extraction/invoice-extractor.js';
 import {
@@ -28,6 +29,8 @@ describe('GET /api/invoices/:id', () => {
     await resetJobs(t);
     await createUser(t.prisma, { email: 'clerk@camex.aero' });
     cookie = await login(t, 'clerk@camex.aero');
+    // Business day 2026-10-02 in Tbilisi, so date-based flags are stable.
+    vi.spyOn(t.app.get<Clock>(CLOCK), 'now').mockReturnValue(new Date('2026-10-02T08:00:00Z'));
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -84,8 +87,23 @@ describe('GET /api/invoices/:id', () => {
       extractionPromptVersion: 'extract-v1',
       extractedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       vendorId: null,
-      disputeDeadline: null,
-      flags: [],
+      vendor: null,
+      dueDateSource: 'printed',
+      disputeDeadline: '2026-09-30',
+      flags: [
+        {
+          code: 'DISPUTE_SOON',
+          severity: 'warning',
+          field: 'disputeDeadline',
+          message: 'Dispute window ended 2026-09-30',
+        },
+        {
+          code: 'NEW_VENDOR',
+          severity: 'info',
+          field: 'vendorName',
+          message: 'No vendor matched: link an existing vendor or create one',
+        },
+      ],
     });
     expect(res.body.invoiceDate).toBe('2026-09-16');
     expect(res.body.totalAmount).toBe('15617.79');

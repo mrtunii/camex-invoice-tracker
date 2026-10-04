@@ -1,6 +1,7 @@
 import { buffer } from 'node:stream/consumers';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ExtractedInvoice } from '@camex/shared';
+import { InvoiceEvaluator } from '../evaluation/invoice-evaluator.js';
 import { extractedInvoiceColumns } from '../invoices/invoice-columns.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -24,8 +25,8 @@ export interface ExtractionAttempt {
 
 /**
  * Runs one extraction attempt for one invoice (SPEC §7): extract → normalize → store every
- * field → needs_review. Idempotent: an invoice that is no longer `processing` is left alone.
- * (Vendor matching, derived dates and flags come in T04.)
+ * field → needs_review, then (after commit) vendor match, derived dates and flags. Idempotent:
+ * an invoice that is no longer `processing` is left alone.
  */
 @Injectable()
 export class ExtractionHandler {
@@ -35,6 +36,7 @@ export class ExtractionHandler {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     @Inject(INVOICE_EXTRACTOR) private readonly extractor: InvoiceExtractor,
+    private readonly evaluator: InvoiceEvaluator,
   ) {}
 
   async handle(job: ExtractionAttempt): Promise<void> {
@@ -64,7 +66,8 @@ export class ExtractionHandler {
         email: { from: invoice.inboundEmail.fromAddress, subject: invoice.inboundEmail.subject },
         invoiceId,
       });
-      await this.storeSuccess(invoiceId, result, normalizeExtraction(result.raw));
+      const stored = await this.storeSuccess(invoiceId, result, normalizeExtraction(result.raw));
+      if (stored) await this.evaluator.tryEvaluateWithRelated(invoiceId);
       this.logger.log(
         {
           invoiceId,
@@ -85,11 +88,12 @@ export class ExtractionHandler {
           { invoiceId, attempt, retryable: false, err: message },
           'extraction failed',
         );
-        await failExtraction(this.prisma, invoiceId, {
+        const failed = await failExtraction(this.prisma, invoiceId, {
           error: message,
           event: { attempts: attempt, retryable: false },
           output: error.output,
         });
+        if (failed) await this.evaluator.tryEvaluateWithRelated(invoiceId);
         return;
       }
 
@@ -101,21 +105,23 @@ export class ExtractionHandler {
         'extraction attempt failed',
       );
       if (isFinalAttempt) {
-        await failExtraction(this.prisma, invoiceId, {
+        const failed = await failExtraction(this.prisma, invoiceId, {
           error: message,
           event: { attempts: attempt },
         });
+        if (failed) await this.evaluator.tryEvaluateWithRelated(invoiceId);
       }
       throw error;
     }
   }
 
+  /** Returns whether the result was applied (false: the invoice was no longer processing). */
   private async storeSuccess(
     invoiceId: string,
     result: ExtractionResult,
     extracted: ExtractedInvoice,
-  ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
       // Conditional on status so a concurrent run can't apply a second result.
       const { count } = await tx.invoice.updateMany({
         where: { id: invoiceId, status: 'processing' },
@@ -130,7 +136,7 @@ export class ExtractionHandler {
           status: 'needs_review',
         },
       });
-      if (count === 0) return;
+      if (count === 0) return false;
       await tx.invoiceEvent.create({
         data: {
           invoiceId,
@@ -144,6 +150,7 @@ export class ExtractionHandler {
           },
         },
       });
+      return true;
     });
   }
 }

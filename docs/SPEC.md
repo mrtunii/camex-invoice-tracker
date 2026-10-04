@@ -97,7 +97,8 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 
 **inbound_emails** — id, provider (`mailgun|manual`), message_id (unique, null for manual), from_address, sender, recipient, subject, body_text (first 20k chars), headers jsonb, attachments jsonb (`[{filename, content_type, size, processed}]`), received_at, uploaded_by_id, created_at
 
-**vendors** — id, name, aliases text[], email_domains text[], default_payment_terms_days int null, bank_accounts jsonb (`[{beneficiary, bank_name, iban, account_number, swift, routing_number, currency, added_at, added_by_id}]`), created_at, updated_at
+**vendors** — id, name, aliases text[], email_domains text[], default_payment_terms_days int null, bank_accounts jsonb (`[{id, beneficiary, bank_name, iban, account_number, swift, routing_number, currency, added_at, added_by_id, source_invoice_id, removed_at, removed_by_id}]`), created_at, updated_at
+- A bank account entry is added from an invoice (`source_invoice_id`, §9). Removal is soft: `removed_at`/`removed_by_id` are set, matching ignores the entry, and it stays as the audit trail.
 
 **invoices** — one row per PDF
 - source: inbound_email_id, file_key, file_name, file_sha256, file_size, page_count
@@ -106,7 +107,7 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 - document_type: `invoice | credit_note | proforma | statement | other`
 - parties: vendor_id (null), vendor_name, vendor_tax_id, bill_to_name
 - invoice_number
-- dates: invoice_date, service_date, due_date, dispute_deadline
+- dates: invoice_date, service_date, due_date, due_date_source (`printed | terms | vendor_default | manual`, null when there is no due date), dispute_deadline
 - terms: payment_terms_text, payment_terms_days, dispute_window_days
 - classification: category (`fuel | ground_handling | airport_charges | navigation | catering | maintenance | crew | other`), description (one human-readable line)
 - operation: airport_icao, airport_iata, location_text, aircraft_registration, flight_numbers text[]
@@ -140,10 +141,10 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 
 ## 7. Extraction
 
-- Send the PDF natively to a multimodal model. No separate OCR step. Structured output via JSON schema, temperature 0.
+- Send the PDF natively to a multimodal model. No separate OCR step. Structured output via JSON schema, model default sampling (the current model rejects `temperature`).
 - The output schema is defined once in `packages/shared` (zod) and converted to JSON Schema for the provider.
 - The model extracts **what is printed**. Code derives the rest:
-  - `due_date`: printed → else invoice_date + payment_terms_days → else invoice_date + vendor default terms → else null.
+  - `due_date`: printed → else invoice_date + payment_terms_days → else invoice_date + vendor default terms → else null. `due_date_source` records which (`printed`, `terms`, `vendor_default`); a `printed` or `manual` date is never re-derived. The extraction write stores the printed date with source `printed`, or neither.
   - `dispute_deadline`: invoice_date + dispute_window_days (conservative when the clause says "from receipt").
 - The prompt is a versioned constant (`extract-v1`, …) and must state:
   - We are the customer: Camex Airlines LLC, Tbilisi, Georgia (ID 405487487). The vendor is the other party.
@@ -162,38 +163,46 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 - The recovery sweep re-enqueues invoices stuck in `processing` for 10–60 minutes; past 60 minutes it gives up (`extraction_failed`, "Extraction did not finish within 60 minutes", `needs_review`).
 - Flight-number shorthand (`CMS503/4` → `CMS503`, `CMS504`) and registration normalization (`4LCMX` → `4L-CMX`) happen in code, not in the prompt.
 - **Eval:** `pnpm eval:extraction` runs every fixture and diffs against `fixtures/invoices/expected/*.json`, per field. Run on every prompt or model change. Golden files are provided by the CTO in T03.
+- Thinking and effort stay at the model defaults. A change to the model, effort or prompt requires an eval run.
 
 ## 8. Validation flags (code, not LLM)
 
-Recomputed after extraction and after every edit. Money tolerance: |diff| ≤ max(0.05, 0.01% of expected).
+Recomputed after extraction (success or final failure), after every edit, after every vendor change (for that vendor's `needs_review` and `unpaid` invoices; a new vendor or a changed name, alias or domain also re-matches unlinked `needs_review` invoices), and daily at 00:05 Asia/Tbilisi for every `needs_review` and `unpaid` invoice (DISPUTE_SOON and FUTURE_DATE depend on the date). No flags while `processing`. Money tolerance: |diff| ≤ max(0.05, 0.01% of expected), decimal arithmetic only.
+
+Each flag is `{code, severity, field, message}`. `field` is the camelCase path of the field it is about, for the review UI to focus (`dueDate`, `totalAmount`, `lineItems.1.amount`, `bankDetails.iban`), or null. Flags are ordered errors, then warnings, then info (table order within a severity). Messages are plain English and never contain bank account numbers.
 
 | Code | Severity | Rule |
 |---|---|---|
 | EXTRACTION_FAILED | error | extraction failed |
-| MISSING_REQUIRED | error | a field required for approval is empty |
-| TOTAL_MATH | error | neither sum(line amounts) nor sum(line amounts) + tax_amount equals total_amount |
-| LINE_MATH | warning | quantity × unit_price ≠ amount on a line |
+| MISSING_REQUIRED | error | a field required for approval is empty (one flag per field) |
+| TOTAL_MATH | error | neither sum(line amounts) nor sum(line amounts) + tax_amount equals total_amount; skipped without line items or total |
+| LINE_MATH | warning | quantity × unit_price ≠ amount on a line (lines with all three only) |
 | DUE_BEFORE_INVOICE | error | due_date < invoice_date |
-| TERMS_MISMATCH | warning | printed due_date ≠ invoice_date + payment_terms_days |
-| DUE_DATE_DERIVED | info | due_date was computed, not printed |
+| TERMS_MISMATCH | warning | printed due_date ≠ invoice_date + payment_terms_days (source `printed` and terms set) |
+| DUE_DATE_DERIVED | info | due_date was computed, not printed (source `terms` or `vendor_default`) |
 | FUTURE_DATE | warning | invoice_date > today |
 | SERVICE_AFTER_INVOICE | warning | service_date > invoice_date |
 | PAY_IN_OTHER_CURRENCY | info | amount_due_currency ≠ currency |
-| NOT_BILLED_TO_CAMEX | warning | bill_to_name doesn't contain "camex" (case-insensitive) |
+| NOT_BILLED_TO_CAMEX | warning | bill_to_name doesn't contain "camex" (case-insensitive), or is empty |
 | NOT_AN_INVOICE | warning | document_type ∉ {invoice, credit_note} |
-| DUPLICATE_FILE | error | same sha256 on another non-rejected invoice |
-| DUPLICATE_NUMBER | error | same vendor (or normalized vendor_name) + invoice_number on another non-rejected invoice |
+| DUPLICATE_FILE | error | same sha256 on another non-rejected invoice, in any status (including paid) |
+| DUPLICATE_NUMBER | error | same invoice number (uppercase, spaces removed) and same vendor on another non-rejected invoice, in any status: same vendor_id, or the same normalized vendor_name when either is unlinked |
 | NEW_VENDOR | info | no vendor matched |
-| BANK_FIRST_SEEN | warning | vendor has no trusted accounts yet |
-| BANK_UNKNOWN | error | vendor has trusted accounts; extracted account matches none |
-| DISPUTE_SOON | warning | needs_review and dispute_deadline within 3 days |
+| BANK_FIRST_SEEN | warning | vendor linked, invoice has an IBAN/account number, vendor has no active trusted accounts yet |
+| BANK_UNKNOWN | error | vendor has active trusted accounts; extracted account matches none |
+| DISPUTE_SOON | warning | needs_review and dispute_deadline within 3 days, including deadlines already passed ("Dispute window ended …") |
 
-Bank matching compares normalized IBAN / account number (spaces removed, uppercase). On approve with `BANK_FIRST_SEEN`, the dialog shows the bank details and offers "trust these details for <vendor>" (writes `bank_account_trusted`). `BANK_UNKNOWN` requires "approve anyway" and shows: "Bank details differ from the ones on file. Verify by phone with the vendor before paying."
+Bank matching compares normalized IBAN / account number (spaces removed, uppercase): the IBAN when there is one, else the account number.
+
+Duplicates converge even when two arrive at once: after each commit the invoice is re-evaluated, then every other invoice sharing its sha256 or invoice number, so whichever commits last re-flags the other. On approve with `BANK_FIRST_SEEN`, the dialog shows the bank details and offers "trust these details for <vendor>" (writes `bank_account_trusted`). `BANK_UNKNOWN` requires "approve anyway" and shows: "Bank details differ from the ones on file. Verify by phone with the vendor before paying."
 
 ## 9. Vendors
 
-- After extraction: match normalized vendor_name (lowercase, punctuation and legal suffixes like LLC/Ltd/FZE/GmbH stripped) against name + aliases; then sender email domain against email_domains. No match → vendor_id null + `NEW_VENDOR`.
-- On approve without a vendor: "Create vendor" or "Link to existing" (searchable). Linking under a different name adds it to aliases.
+- Matching runs for unlinked invoices in `needs_review` (after extraction and on the re-evaluations of §8). Order: the normalized vendor_name against each vendor's name and aliases; then the sender's email domain (the From address) against email_domains, only for emails received through Mailgun (never manual uploads) and never for a domain in `OWN_EMAIL_DOMAINS` (config, comma-separated, default `camex.aero`; subdomains included). A name match beats a domain match. A match writes `vendor_linked` (`{vendorId, method: name | alias | email_domain}`, system). No match → vendor_id null + `NEW_VENDOR`.
+- Normalized name ("vendor key"): lowercase, punctuation removed, whitespace collapsed, a leading "შპს" or "ооо" removed, trailing legal forms removed repeatedly (llc, ltd, limited, fze, fzco, fzllc, gmbh, inc, incorporated, corp, corporation, co, company, plc, llp, sa, srl, sarl, bv, ag, jsc, ojsc, cjsc, ooo, na).
+- Uniqueness: name and alias keys are unique across all vendors' names and aliases, and email domains across vendors (409 naming the other vendor). Domains are lowercase hostnames; `OWN_EMAIL_DOMAINS` and public mailbox domains (gmail.com, googlemail.com, outlook.com, hotmail.com, live.com, yahoo.com, icloud.com, mail.ru, yandex.ru, proton.me) are refused. Default terms: 0–365 days or none.
+- On approve without a vendor: "Create vendor" or "Link to existing" (searchable). A manual link (`vendor_linked`, `method: manual`) adds the extracted vendor_name to the vendor's aliases when neither its name nor an alias matches it (subject to the uniqueness rule).
+- Trusted bank accounts are added only from an invoice ("trust these details", in `needs_review` or `unpaid`, writes `bank_account_trusted` with ids only); there is no manual entry in v1. Removal is soft (§5).
 - Vendors page: list; edit name, aliases, domains, default terms; view/remove trusted bank accounts.
 
 ## 10. UI

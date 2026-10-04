@@ -6,16 +6,21 @@ import { type DynamicModule, Module, type Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import {
+  type Clock,
   type ExtractedInvoice,
   type ExtractionOutputV1,
   extractedInvoiceSchema,
 } from '@camex/shared';
 import request from 'supertest';
+import { vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import { hashPassword } from '../src/auth/password.js';
+import { CLOCK } from '../src/clock/clock.module.js';
 import { SESSION_COOKIE } from '../src/auth/session-token.js';
 import { type Env, loadRootEnvFile, parseEnv } from '../src/config/env.js';
+import { ExtractionHandler } from '../src/extraction/extraction.handler.js';
+import { INVOICE_EXTRACTOR, type InvoiceExtractor } from '../src/extraction/invoice-extractor.js';
 import type { User } from '../src/generated/prisma/client.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
@@ -288,4 +293,81 @@ export function asmWireOutput(): ExtractionOutputV1 {
     flightNumbers: ['CMS503/4'],
     aircraftRegistration: '4LCME',
   };
+}
+
+// ─── Evaluation (T04) ─────────────────────────────────────────────────────────
+
+export type FixtureName = 'asm' | 'petrocas' | 'aeg';
+
+/** Plausible sender addresses for the fixtures (as in `pnpm simulate:mailgun`). */
+export const FIXTURE_SENDERS: Record<FixtureName, string> = {
+  asm: 'ASM Aviation Services <accounts@asm-aviation.example>',
+  petrocas: 'Petrocas <billing@petrocas-fuel.example>',
+  aeg: 'AEG Fuels <ar@aegfuels.example>',
+};
+
+/** Pins "now" for business logic (Tbilisi business day `date`, mid-morning). */
+export function setToday(t: TestApp, date: string): void {
+  vi.spyOn(t.app.get<Clock>(CLOCK), 'now').mockReturnValue(new Date(`${date}T08:00:00Z`));
+}
+
+/** A copy of a fixture PDF with different bytes (another sha256), still a readable PDF. */
+export function pdfVariant(name: FixtureName, tag: string): Buffer {
+  return Buffer.concat([fixture(`${name}.pdf`), Buffer.from(`\n% variant ${tag}\n`)]);
+}
+
+/** Ingests one PDF by (simulated) Mailgun; returns the invoice id. */
+export async function ingestPdf(
+  t: TestApp,
+  options: { pdf: Buffer; from?: string; fileName?: string },
+): Promise<string> {
+  const res = await postMailgun(t, {
+    fields: options.from === undefined ? {} : { from: options.from },
+    attachments: [
+      {
+        filename: options.fileName ?? 'invoice.pdf',
+        contentType: 'application/pdf',
+        data: options.pdf,
+      },
+    ],
+  }).expect(200);
+  return res.body.invoiceIds[0] as string;
+}
+
+/** Runs the real extraction handler once, with the extractor returning `raw`. */
+export async function extractWith(
+  t: TestApp,
+  invoiceId: string,
+  raw: ExtractionOutputV1,
+): Promise<void> {
+  vi.spyOn(t.app.get<InvoiceExtractor>(INVOICE_EXTRACTOR), 'extract').mockResolvedValueOnce({
+    model: 'claude-sonnet-5-5',
+    promptVersion: 'extract-v1',
+    raw,
+    usage: { inputTokens: 1, outputTokens: 1 },
+    durationMs: 1,
+  });
+  await t.app.get(ExtractionHandler).handle({ data: { invoiceId }, retryCount: 0, retryLimit: 2 });
+}
+
+/** Ingests fixture `name` from its usual sender and extracts it as its golden file says. */
+export async function ingestFixture(
+  t: TestApp,
+  name: FixtureName,
+  options: { pdf?: Buffer; from?: string; wire?: Partial<ExtractionOutputV1> } = {},
+): Promise<string> {
+  const invoiceId = await ingestPdf(t, {
+    pdf: options.pdf ?? fixture(`${name}.pdf`),
+    from: options.from ?? FIXTURE_SENDERS[name],
+    fileName: `${name}.pdf`,
+  });
+  await extractWith(t, invoiceId, {
+    ...wireFromExpected(expectedExtraction(name)),
+    ...options.wire,
+  });
+  return invoiceId;
+}
+
+export function flagCodes(flags: unknown): string[] {
+  return (flags as { code: string }[]).map((flag) => flag.code);
 }

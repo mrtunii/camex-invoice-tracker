@@ -76,6 +76,7 @@ describe('inbox and invoice files', () => {
           status: 'processing',
           extractionStatus: 'pending',
           fileName: 'SI-000218719.pdf',
+          flags: [],
         },
       ],
     });
