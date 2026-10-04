@@ -18,7 +18,9 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  Moon,
   Store,
+  Sun,
   Users,
 } from 'lucide-react';
 import { type ComponentType, Suspense, useState } from 'react';
@@ -77,7 +79,8 @@ function SidebarLink({ item, compact }: { item: NavItem; compact: boolean }) {
       className={cn(
         'flex h-9 w-full items-center gap-3 rounded-control px-2.5 text-sm text-foreground no-underline outline-none hover:no-underline focus-visible:focus-ring',
         compact && 'justify-center px-0',
-        active ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-default',
+        // The current page is a neutral grey, not the accent: colour stays for actions and alerts.
+        active ? 'bg-default font-medium' : 'hover:bg-default/60',
       )}
     >
       <Icon className={cn('size-[18px] shrink-0', !active && 'text-muted')} aria-hidden />
@@ -183,11 +186,39 @@ function UserMenu({ compact }: { compact: boolean }) {
   );
 }
 
+/** One click between light and dark; the user menu also offers "System". */
+function ThemeToggle({ compact }: { compact: boolean }) {
+  const { resolved, setTheme } = useThemeChoice();
+  const label = resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  return (
+    <Tooltip delay={0} closeDelay={0}>
+      <Button
+        isIconOnly
+        size="sm"
+        variant="ghost"
+        aria-label={label}
+        onPress={() => setTheme(resolved === 'dark' ? 'light' : 'dark')}
+        className="shrink-0 text-muted"
+      >
+        {resolved === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
+      </Button>
+      <Tooltip.Content placement={compact ? 'right' : 'bottom'}>{label}</Tooltip.Content>
+    </Tooltip>
+  );
+}
+
 function Sidebar({ compact }: { compact: boolean }) {
   return (
     <div className="flex h-full flex-col gap-6 px-3 py-4">
-      <div className={cn('flex h-8 items-center px-2.5', compact && 'justify-center px-0')}>
+      {/* The theme toggle sits beside the wordmark; the icon-only sidebar has no room there. */}
+      <div
+        className={cn(
+          'flex h-8 items-center justify-between pl-2.5',
+          compact && 'justify-center pl-0',
+        )}
+      >
         <Wordmark compact={compact} />
+        {!compact && <ThemeToggle compact={false} />}
       </div>
       <nav aria-label="Main" className="flex flex-1 flex-col gap-1">
         {MAIN_NAV.map((item) => (
@@ -197,6 +228,11 @@ function Sidebar({ compact }: { compact: boolean }) {
           <SidebarLink item={TEAM_NAV} compact={compact} />
         </div>
       </nav>
+      {compact && (
+        <div className="flex justify-center">
+          <ThemeToggle compact />
+        </div>
+      )}
       <UserMenu compact={compact} />
     </div>
   );
@@ -204,8 +240,8 @@ function Sidebar({ compact }: { compact: boolean }) {
 
 /**
  * The signed-in shell. A 224 px sidebar on the left; below 1024 px it shrinks to icons, and below
- * 640 px it becomes a drawer behind a menu button. Content is left-aligned, at most 1280 px wide,
- * except on full-bleed routes (the invoice split view).
+ * 640 px it becomes a drawer behind a menu button. Content is centred in the space beside the
+ * sidebar, at most 1440 px wide, except on full-bleed routes (the invoice split view).
  */
 export function AppLayout() {
   const wide = useMediaQuery(WIDE, { initializeWithValue: true });
@@ -253,7 +289,9 @@ export function AppLayout() {
       <div className="min-w-0 flex-1">
         <main
           className={
-            fullBleed ? 'min-w-0' : 'max-w-[1280px] px-4 pt-6 pb-16 sm:px-8 sm:pt-8 lg:px-10'
+            fullBleed
+              ? 'min-w-0'
+              : 'mx-auto max-w-[1440px] px-4 pt-6 pb-16 sm:px-8 sm:pt-8 lg:px-10'
           }
         >
           <Suspense fallback={<PageFallback />}>

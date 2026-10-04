@@ -6,6 +6,7 @@ import {
   type InvoiceCategory,
   type InvoiceListStatus,
   type InvoiceSortKey,
+  type InvoiceSummary,
   type SortOrder,
   currencyCodeSchema,
   dueFilterSchema,
@@ -109,6 +110,22 @@ export function writeListParams(params: ListParams): URLSearchParams {
   if (params.order) search.set('order', params.order);
   if (params.page > 1) search.set('page', String(params.page));
   return search;
+}
+
+/**
+ * An arrival on the plain list: the sidebar link, or "Approve & next" after the last review. Not
+ * when the URL asks for something, or when the list made this history entry itself (the To review
+ * tab was clicked): then the URL stands.
+ */
+export function isArrival(search: URLSearchParams, madeByList: boolean): boolean {
+  return !madeByList && search.toString() === '';
+}
+
+/** The tab an arrival opens: To pay when nothing is left to review but something is to pay. */
+export function arrivalStatus(
+  counts: Pick<InvoiceSummary['counts'], 'needs_review' | 'unpaid'>,
+): 'needs_review' | 'unpaid' {
+  return counts.needs_review === 0 && counts.unpaid > 0 ? 'unpaid' : 'needs_review';
 }
 
 export function hasActiveFilters(filters: ListFilters): boolean {

@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Camex Invoices</title>
-    <!-- The stored theme (Light / Dark / System, see src/lib/theme.tsx) before the first paint. -->
+    <!-- The stored theme (Light / Dark / System, see src/lib/theme.ts; Light until the user picks
+         one) before the first paint. -->
     <script>
       (function () {
         try {
-          var theme = localStorage.getItem('heroui-theme') || 'system';
+          var theme = localStorage.getItem('heroui-theme') || 'light';
           if (theme === 'system') {
             theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
           }

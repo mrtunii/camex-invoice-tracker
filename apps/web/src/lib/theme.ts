@@ -1,10 +1,12 @@
 import { createContext, useContext } from 'react';
 
-/** Light, dark, or follow the system setting (the default). */
+/** Light (the default), dark, or follow the system setting. */
 export type ThemeChoice = 'light' | 'dark' | 'system';
 
 export interface ThemeState {
   theme: ThemeChoice;
+  /** What is on screen: the choice, or the system setting while the choice is "system". */
+  resolved: 'light' | 'dark';
   setTheme: (theme: ThemeChoice) => void;
 }
 

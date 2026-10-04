@@ -10,7 +10,7 @@ import {
 import { Button, Link, Pagination, Tabs, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleCheck, Download } from 'lucide-react';
-import { type ReactNode, useCallback, useMemo } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/page-header';
 import { UploadInvoicesDialog } from '@/components/upload-invoices-dialog';
@@ -30,11 +30,20 @@ import {
 } from './invoices-query';
 import {
   NO_FILTERS,
+  arrivalStatus,
   effectiveSort,
   hasActiveFilters,
+  isArrival,
   readListParams,
   writeListParams,
 } from './list-params';
+
+/** History state of the entries the list makes itself (tabs, filters, sort, pages). */
+const MADE_BY_LIST = { madeByList: true } as const;
+
+function hasFlag(state: unknown, flag: string): boolean {
+  return typeof state === 'object' && state !== null && Reflect.get(state, flag) === true;
+}
 
 const TABS: { status: InvoiceListStatus; label: string }[] = [
   { status: 'needs_review', label: 'To review' },
@@ -193,11 +202,16 @@ function TabLabel({ label, count }: { label: string; count: number | undefined }
 }
 
 export function InvoicesPage() {
-  const [search, setSearch] = useSearchParams();
+  const [search, setSearchParams] = useSearchParams();
   const params = useMemo(() => readListParams(search), [search]);
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  // Every URL change made here is marked, so an arrival (below) can be told from a click on a tab.
+  const setSearch: typeof setSearchParams = useCallback(
+    (next, options) => setSearchParams(next, { ...options, state: MADE_BY_LIST }),
+    [setSearchParams],
+  );
 
   const list = useInvoiceList(params);
   const summary = useInvoiceSummary(
@@ -240,12 +254,26 @@ export function InvoicesPage() {
 
   // "Approve & next" lands here when nothing is left to review.
   const navState: unknown = location.state;
-  const caughtUp =
-    params.status === 'needs_review' &&
-    typeof navState === 'object' &&
-    navState !== null &&
-    'caughtUp' in navState &&
-    navState.caughtUp === true;
+  const caughtUp = hasFlag(navState, 'caughtUp');
+
+  // An arrival on the plain list waits for fresh counts (cached ones may predate the last
+  // approval), then settles the tab once: To pay when nothing is left to review. Replacing the
+  // entry records the decision, so Back, Forward and reload don't decide again.
+  const arriving = isArrival(search, hasFlag(navState, 'madeByList'));
+  const settled = !summary.isFetching && !summary.isPlaceholderData;
+  const landOn =
+    !arriving || !settled
+      ? null
+      : summary.data
+        ? arrivalStatus(summary.data.counts)
+        : 'needs_review';
+  useEffect(() => {
+    if (landOn === null) return;
+    setSearchParams(writeListParams({ ...params, status: landOn }), {
+      replace: true,
+      state: caughtUp ? { ...MADE_BY_LIST, caughtUp: true } : MADE_BY_LIST,
+    });
+  }, [landOn, params, caughtUp, setSearchParams]);
 
   const counts: InvoiceSummary['counts'] | undefined = summary.data?.counts;
   const data = list.data;
@@ -321,7 +349,7 @@ export function InvoicesPage() {
           )}
 
           <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            {data ? <TotalsLine data={data} /> : <span />}
+            {data && !arriving ? <TotalsLine data={data} /> : <span />}
             <Button
               size="sm"
               variant="ghost"
@@ -356,7 +384,8 @@ export function InvoicesPage() {
                   void navigate(`/invoices/${id}`, { state: { from: location.search } })
                 }
                 today={today}
-                loading={list.isPending}
+                // Until an arrival has settled its tab, To review shows loading, not "Nothing to review".
+                loading={list.isPending || arriving}
                 stale={list.isPlaceholderData}
                 empty={empty}
               />
