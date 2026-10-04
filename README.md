@@ -65,6 +65,10 @@ After every extraction the invoice is evaluated (`apps/api/src/evaluation/`): it
 
 Vendors are managed on `/vendors` (or `/api/vendors`). Creating or changing a vendor re-evaluates the invoices it can affect, so pending invoices link as soon as their vendor exists. Bank accounts are trusted from an invoice (`POST /api/invoices/:id/trust-bank-details`; the review UI comes in T06) and removed on `/vendors`. Every open invoice is re-evaluated daily at 00:05 Asia/Tbilisi, because some flags depend on the date. `OWN_EMAIL_DOMAINS` (default `camex.aero`) lists Camex's own mail domains: they never identify a vendor.
 
+## Invoices list
+
+`/invoices` (also `/`) lists invoices by status tab (Needs review, which includes invoices still processing · Unpaid · Paid · Rejected · All) with counts, the unpaid totals per currency (never converted), overdue and due-in-7-days counts, filters (search over vendor, invoice #, registration and flight numbers; vendor; category; currency; invoice date range; has errors) and sortable columns. Tab, filters, sort and page are in the URL. **Export CSV** downloads the current tab, filters and sort (UTF-8 with BOM so Excel shows Georgian text; formula-like cells are prefixed with `'`; at most 10,000 rows). The API behind it: `GET /api/invoices`, `GET /api/invoices/summary` and `GET /api/invoices/export.csv`, with the query parameters of `packages/shared/src/invoice-list.ts` (unknown parameters are refused). Clicking a row opens `/invoices/:id` (an interim page with the PDF link until T06).
+
 ## Everyday commands
 
 | Command                                               | What it does                                                                                       |

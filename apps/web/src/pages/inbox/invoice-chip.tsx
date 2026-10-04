@@ -2,6 +2,7 @@ import type { InboxInvoice } from '@camex/shared';
 import { ExternalLink } from 'lucide-react';
 import { FlagCounts } from '@/components/flag-counts';
 import { InvoiceStatusBadge } from '@/components/invoice-status-badge';
+import { TruncatedText } from '@/components/truncated-text';
 import { apiUrl } from '@/lib/config';
 
 /** One invoice created from an email: status, file name, flag counts and "Open PDF" (new tab). */
@@ -9,9 +10,7 @@ export function InvoiceChip({ invoice }: { invoice: InboxInvoice }) {
   return (
     <div className="flex max-w-full min-w-0 items-center gap-2 rounded-md border border-border bg-background py-1 pr-1 pl-1.5">
       <InvoiceStatusBadge status={invoice.status} extractionStatus={invoice.extractionStatus} />
-      <span className="min-w-0 truncate font-mono text-xs" title={invoice.fileName}>
-        {invoice.fileName}
-      </span>
+      <TruncatedText text={invoice.fileName} className="font-mono text-xs" />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <FlagCounts flags={invoice.flags} />
         <a

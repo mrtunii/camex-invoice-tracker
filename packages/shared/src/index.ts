@@ -5,6 +5,7 @@ export * from './auth.js';
 export * from './users.js';
 export * from './extraction.js';
 export * from './invoices.js';
+export * from './invoice-list.js';
 export * from './inbox.js';
 export * from './inbound.js';
 export * from './vendors.js';

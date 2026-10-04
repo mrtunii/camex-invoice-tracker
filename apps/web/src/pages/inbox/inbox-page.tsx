@@ -2,6 +2,7 @@ import type { InboxEmail } from '@camex/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { TruncatedText } from '@/components/truncated-text';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,17 +26,15 @@ function InboxRow({ email, onOpen }: { email: InboxEmail; onOpen: () => void }) 
   return (
     <TableRow className="cursor-pointer align-top" onClick={onOpen}>
       <TableCell className="whitespace-nowrap">{formatTimestamp(email.receivedAt)}</TableCell>
-      <TableCell className="max-w-48">
-        <span className="block truncate font-mono text-[0.8125rem]" title={email.fromAddress ?? ''}>
-          {email.fromAddress ?? '—'}
-        </span>
+      <TableCell>
+        <TruncatedText text={email.fromAddress ?? '—'} className="font-mono text-[0.8125rem]" />
         {email.provider === 'manual' && (
           <Badge variant="outline" className="mt-1">
             Manual upload
           </Badge>
         )}
       </TableCell>
-      <TableCell className="max-w-60">
+      <TableCell>
         {/* The whole row is clickable; this button makes it reachable by keyboard. */}
         <button
           type="button"
@@ -43,13 +42,16 @@ function InboxRow({ email, onOpen }: { email: InboxEmail; onOpen: () => void }) 
             e.stopPropagation();
             onOpen();
           }}
-          className="block max-w-full truncate text-left font-medium hover:underline focus-visible:underline focus-visible:outline-none"
-          title={email.subject ?? undefined}
+          className="block max-w-full text-left font-medium hover:underline focus-visible:underline focus-visible:outline-none"
         >
-          {email.subject ?? <span className="text-muted-foreground">(no subject)</span>}
+          {email.subject === null ? (
+            <span className="text-muted-foreground">(no subject)</span>
+          ) : (
+            <TruncatedText text={email.subject} />
+          )}
         </button>
       </TableCell>
-      <TableCell className="w-full min-w-64">
+      <TableCell>
         {email.invoices.length === 0 ? (
           <span className="text-muted-foreground">No PDF</span>
         ) : (
@@ -60,18 +62,14 @@ function InboxRow({ email, onOpen }: { email: InboxEmail; onOpen: () => void }) 
           </div>
         )}
       </TableCell>
-      <TableCell className="max-w-36 text-muted-foreground">
+      <TableCell className="text-muted-foreground">
         {ignored.length === 0 ? (
           '—'
         ) : (
           <ul className="space-y-0.5">
             {ignored.map((a, i) => (
-              <li
-                key={`${a.filename}-${String(i)}`}
-                className="truncate font-mono text-xs"
-                title={`${a.filename} (${a.contentType})`}
-              >
-                {a.filename}
+              <li key={`${a.filename}-${String(i)}`}>
+                <TruncatedText text={a.filename} className="font-mono text-xs" />
               </li>
             ))}
           </ul>
@@ -114,7 +112,15 @@ export function InboxPage() {
         <p className="text-destructive">{inbox.error.message}</p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <Table>
+          {/* Fixed layout: long values truncate (with a tooltip) instead of widening the table. */}
+          <Table className="min-w-[52rem] table-fixed">
+            <colgroup>
+              <col className="w-[9rem]" />
+              <col className="w-[12rem]" />
+              <col />
+              <col className="w-[22rem]" />
+              <col className="w-[8rem]" />
+            </colgroup>
             <TableHeader>
               <TableRow>
                 <TableHead>Received</TableHead>

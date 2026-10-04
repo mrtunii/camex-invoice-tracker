@@ -77,7 +77,10 @@ export async function createTestApp(
   };
   const app = await NestFactory.create<NestExpressApplication>(root, { bufferLogs: true });
   configureApp(app, env);
-  await app.init();
+  // Listen on 127.0.0.1 ourselves. Left unbound, supertest binds an ephemeral port on `::` for
+  // each request but connects to 127.0.0.1:<port>, which reaches any other program listening on
+  // that port on 127.0.0.1 only (seen as random 403s and socket hang-ups on a busy machine).
+  await app.listen(0, '127.0.0.1');
 
   return {
     app,

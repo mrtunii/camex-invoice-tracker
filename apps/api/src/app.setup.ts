@@ -70,6 +70,8 @@ export function configureApp(app: NestExpressApplication, env: Env): void {
             credentials: true,
             methods: ['GET', 'POST', 'PATCH', 'DELETE'],
             allowedHeaders: ['Content-Type'],
+            // The CSV export's filename, read by the SPA's download.
+            exposedHeaders: ['Content-Disposition'],
             maxAge: 600,
           }
         : { origin: false },

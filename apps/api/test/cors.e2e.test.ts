@@ -49,6 +49,8 @@ describe('web access: CORS and the Origin check', () => {
         expect(corsHeaders(res)).toEqual({
           'access-control-allow-origin': origin,
           'access-control-allow-credentials': 'true',
+          // The SPA reads the CSV export's filename from it.
+          'access-control-expose-headers': 'Content-Disposition',
         });
         expect(res.headers.vary).toMatch(/Origin/);
       }
@@ -77,6 +79,7 @@ describe('web access: CORS and the Origin check', () => {
         'access-control-allow-credentials': 'true',
         'access-control-allow-methods': 'GET,POST,PATCH,DELETE',
         'access-control-allow-headers': 'Content-Type',
+        'access-control-expose-headers': 'Content-Disposition',
         'access-control-max-age': '600',
       });
     });

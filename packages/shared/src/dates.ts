@@ -41,3 +41,13 @@ export function addDays(date: string, days: number): string {
 export function daysBetween(from: string, to: string): number {
   return Math.round((toUtcMs(to) - toUtcMs(from)) / DAY_MS);
 }
+
+/** `date` is before `today` ('passed'), within today … today + `soonDays` ('soon'), or later (null). */
+export function dateUrgency(
+  date: string,
+  today: string,
+  soonDays: number,
+): 'passed' | 'soon' | null {
+  if (date < today) return 'passed';
+  return date <= addDays(today, soonDays) ? 'soon' : null;
+}

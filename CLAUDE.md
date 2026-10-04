@@ -23,5 +23,6 @@ Safety rules (shared dev machine):
 - Clean-clone checks run in a temp directory under a separate compose project (`docker compose -p camex-invoices-check`). Tear down only that project.
 - Never write credentials into reports, README or committed files.
 - S3 code uses only the standard S3 API; path-style addressing is a config flag.
+- Each task runs on branch tNN-<slug> and ends with one commit. The CTO reviews it; the next task's prompt begins by fast-forward merging the accepted branch into main and pushing. Never merge or push your own task branch; never reset or force-move main.
 
 Report rule: when a task is done, write `docs/reports/Txx-<slug>.md` with: Summary · What was built · Deviations (with reasons) · Decisions not in the spec · How to verify (exact commands from a clean clone, expected result) · Test results (command + output) · Known issues / shortcuts · Questions for the CTO. Be factual: don't claim anything works unless you ran it.

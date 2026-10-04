@@ -2,9 +2,10 @@ import { Navigate, createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/app-layout';
 import { RequireAuth } from '@/components/require-auth';
 import { InboxPage } from '@/pages/inbox/inbox-page';
+import { InvoicePage } from '@/pages/invoices/invoice-page';
+import { InvoicesPage } from '@/pages/invoices/invoices-page';
 import { LoginPage } from '@/pages/login-page';
 import { NotFoundPage } from '@/pages/not-found-page';
-import { PlaceholderPage } from '@/pages/placeholder-page';
 import { UsersPage } from '@/pages/users/users-page';
 import { VendorsPage } from '@/pages/vendors/vendors-page';
 
@@ -17,14 +18,8 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="/invoices" replace /> },
-          {
-            path: 'invoices',
-            element: (
-              <PlaceholderPage title="Invoices">
-                Invoices that arrive by email or are uploaded will be listed here for review.
-              </PlaceholderPage>
-            ),
-          },
+          { path: 'invoices', element: <InvoicesPage /> },
+          { path: 'invoices/:id', element: <InvoicePage /> },
           { path: 'inbox', element: <InboxPage /> },
           { path: 'vendors', element: <VendorsPage /> },
           { path: 'users', element: <UsersPage /> },

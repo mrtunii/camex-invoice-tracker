@@ -213,8 +213,9 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 - Status tabs with counts: Needs review · Unpaid · Paid · Rejected · All. Rows still `processing` appear in Needs review with a "Processing…" badge.
 - Summary strip: unpaid totals grouped by currency (never converted) · overdue count · due in next 7 days.
 - Columns: received, vendor, invoice #, invoice date, due date (red overdue, amber due soon), amount due + currency, category, location, flags (counts by severity).
-- Default sort: Needs review → dispute_deadline asc, then received asc · Unpaid → due_date asc · Paid → paid_at desc.
-- Filters: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range. CSV export of the current filter. Upload button (drag & drop).
+- Default sort: Needs review → dispute_deadline asc, then received asc · Unpaid → due_date asc · Paid → paid_at desc · Rejected, All → received desc. Nulls sort last; ties break by received, then id (stable pages).
+- Filters: search (vendor, invoice #, flight, registration), vendor, category, currency, invoice date range, has errors, due (overdue / next 7 days, from the summary links). CSV export of the current tab, filter and sort (UTF-8 with BOM, at most 10,000 rows). Upload button (drag & drop).
+- Tab, filters, sort and page live in the URL. API: `GET /api/invoices`, `GET /api/invoices/summary`, `GET /api/invoices/export.csv` (T05).
 
 **Invoice detail `/invoices/:id` — split view**
 - Left (~55%, resizable): PDF via pdf.js/react-pdf; page nav, zoom, fit width, download, open in new tab.
@@ -243,7 +244,7 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 - Server-side input validation with zod from `packages/shared`.
 - Health: `GET /api/health` (public) checks the database and the bucket (ListObjectsV2, 2 s timeout); 503 if either fails. The API image's Docker `HEALTHCHECK` calls it; the web image serves `/healthz`.
 - Migrations run on start: the API container applies `prisma migrate deploy`, then starts the server. A failed migration stops the container.
-- Daily Postgres backups from the database host; the bucket is protected by R2 bucket lock rules (R2 has no object versioning) and the app never deletes or overwrites objects. Runbook: [docs/deploy.md](deploy.md).
+- Daily Postgres backups from the database host; the production bucket is protected by an indefinite R2 bucket lock rule (R2 has no object versioning; staging has no lock, so it can be wiped) and the app never deletes or overwrites objects. Runbook: [docs/deploy.md](deploy.md).
 
 ## 13. Task roadmap
 
@@ -261,5 +262,5 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 
 - Each task is a prompt from the CTO. Claude Code reads this spec and `CLAUDE.md`, implements only that task, and writes `docs/reports/Txx-<slug>.md`.
 - If implementation exposes a spec problem, record it under "Questions for the CTO". Don't silently redesign.
-- Each task runs on branch tNN-<slug> and ends with one commit; the CTO reviews before merge. Reports include `git diff --stat main...HEAD`.
+- Each task runs on branch tNN-<slug> and ends with one commit. The CTO reviews it; the next task's prompt begins by fast-forward merging the accepted branch into main and pushing. Never merge or push your own task branch; never reset or force-move main. Reports include `git diff --stat main...HEAD`.
 - Report sections: Summary · What was built · Deviations (with reasons) · Unspecified decisions made · How to verify (exact commands from a clean clone, expected result) · Test results (command + output summary) · Known issues / shortcuts · Questions for the CTO.

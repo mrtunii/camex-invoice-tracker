@@ -27,7 +27,7 @@ If the zone is on Cloudflare, keep both records **DNS only** (grey cloud). Traef
 
 1. R2 → **Create bucket**: name `camex-invoices-staging`, location automatic. Leave it private: no public access, no r2.dev URL, no custom domain.
 2. R2 → **Manage API tokens** → **Create API token**: permission **Object Read & Write**, applied to **that one bucket** only. Copy the Access Key ID, the Secret Access Key (shown once) and the S3 endpoint `https://<account_id>.r2.cloudflarestorage.com`. A bucket created in a jurisdiction (EU) uses `https://<account_id>.eu.r2.cloudflarestorage.com` instead.
-3. Protection: see §7 (bucket lock rule).
+3. Protection: see §7 (bucket lock rule in production; none on staging).
 
 The token can read, write and list objects, which is all the app does. The health check uses ListObjectsV2 for that reason: HeadBucket is a bucket operation.
 
@@ -211,7 +211,7 @@ node dist/cli/simulate-mailgun.js
 ## 7. Backups checklist
 
 - [ ] **Postgres:** daily automated backups on the database host, with at least 14 days retention (point-in-time recovery if the provider has it). Dokploy's own backup feature covers only databases Dokploy runs itself.
-- [ ] **R2:** R2 has no object versioning. Protect the PDFs with a **bucket lock rule**: Cloudflare dashboard → R2 → `camex-invoices-staging` → Settings → **Bucket lock rules** → Add rule, prefix `invoices/`, retention **indefinite**, or a fixed number of days on staging. Locked objects can't be deleted or overwritten for the retention period. This needs the dashboard (or an admin token); the app's token can't change it. A bucket with lock rules can't be emptied, so use days rather than indefinite if staging may need wiping.
+- [ ] **R2:** R2 has no object versioning, so production PDFs are protected with a **bucket lock rule**. **Staging: no lock rule**, so the staging bucket can still be emptied or wiped. **Production:** Cloudflare dashboard → R2 → the production bucket → Settings → **Bucket lock rules** → Add rule, prefix `invoices/`, retention **indefinite**. Locked objects can't be deleted or overwritten, and a bucket with lock rules can't be emptied. This needs the dashboard (or an admin token); the app's token can't change it.
   - The app never deletes objects and never overwrites one: each PDF is stored once under `invoices/<yyyy>/<mm>/<invoice id>.pdf`.
   - The bucket-scoped token limits the blast radius of a leaked key to this bucket.
 - [ ] **Restore drill (to do):** restore the latest Postgres backup into a scratch database, point a local API at it with read access to the bucket, and open a few invoices and PDFs. Write down the date and how long it took.
@@ -219,6 +219,6 @@ node dist/cli/simulate-mailgun.js
 ## 8. Production later
 
 - **Hosts:** new web and API hosts that follow the same-site rule (e.g. `invoices.camex.aero` + `api.invoices.camex.aero`). Update `WEB_ORIGINS`, `API_BASE_URL` and `INBOX_ADDRESS`, add the new domains to `OWN_EMAIL_DOMAINS`, and add DNS A records.
-- **Mailgun:** a new Mailgun domain for production (e.g. `mg.invoices.camex.aero`) with its MX records, and a new route forwarding to the production API. Also a new signing key. Mailgun's HTTP webhook signing key belongs to the account, not the domain, so a separate key means a separate Mailgun account or subaccount (see the T07 report's questions).
+- **Mailgun:** a new Mailgun domain for production (e.g. `mg.invoices.camex.aero`) with its MX records, and a new route forwarding to the production API. The HTTP webhook signing key belongs to the Mailgun account, not the domain, so for now production and staging share it (CTO decision, T05). To isolate it later, put production in a **Mailgun subaccount**: it has its own signing key, and a leaked staging key then can't forge production webhooks.
 - **Data:** a separate Postgres database and user, and a separate R2 bucket with its own bucket-scoped token. Never share staging's.
 - **Apps:** two new Dokploy applications (or a second environment) with the same build settings and the production variables. Repeat §5 (first boot), §6 (smoke test) and §7 (backups) for production.

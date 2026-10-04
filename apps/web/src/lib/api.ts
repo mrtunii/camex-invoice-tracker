@@ -28,6 +28,17 @@ function messageFrom(body: unknown): string | undefined {
   return undefined;
 }
 
+const UNREACHABLE = "Can't reach the server. Check your connection and try again.";
+
+async function failure(res: Response): Promise<ApiError> {
+  const data: unknown = await res.json().catch(() => undefined);
+  return new ApiError(
+    res.status,
+    messageFrom(data) ?? `Request failed (${String(res.status)})`,
+    data,
+  );
+}
+
 async function send(path: string, { method = 'GET', body }: RequestOptions): Promise<unknown> {
   let res: Response;
   try {
@@ -40,14 +51,11 @@ async function send(path: string, { method = 'GET', body }: RequestOptions): Pro
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError(0, "Can't reach the server. Check your connection and try again.", null);
+    throw new ApiError(0, UNREACHABLE, null);
   }
 
-  const data: unknown = res.status === 204 ? undefined : await res.json().catch(() => undefined);
-  if (!res.ok) {
-    throw new ApiError(res.status, messageFrom(data) ?? `Request failed (${res.status})`, data);
-  }
-  return data;
+  if (!res.ok) throw await failure(res);
+  return res.status === 204 ? undefined : await res.json().catch(() => undefined);
 }
 
 /** JSON request whose response is parsed with a schema from @camex/shared. */
@@ -62,6 +70,36 @@ export async function api<S extends z.ZodType>(
 /** Request whose response has no body (204). */
 export async function apiNoContent(path: string, options: RequestOptions): Promise<void> {
   await send(path, options);
+}
+
+/**
+ * Downloads a file from the API (with the session cookie) and saves it under the name in its
+ * Content-Disposition. Errors come back as ApiError, like any other request, instead of the
+ * browser navigating to a JSON error page.
+ */
+export async function apiDownload(path: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), { credentials: 'include' });
+  } catch {
+    throw new ApiError(0, UNREACHABLE, null);
+  }
+  if (!res.ok) throw await failure(res);
+
+  const fileName =
+    /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'download';
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Revoked on the next task: the click has started the download by then.
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+  return fileName;
 }
 
 export function isUnauthorized(error: unknown): boolean {
