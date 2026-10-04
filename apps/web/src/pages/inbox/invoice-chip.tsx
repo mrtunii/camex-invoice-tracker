@@ -2,6 +2,7 @@ import type { InboxInvoice } from '@camex/shared';
 import { ExternalLink } from 'lucide-react';
 import { FlagCounts } from '@/components/flag-counts';
 import { InvoiceStatusBadge } from '@/components/invoice-status-badge';
+import { apiUrl } from '@/lib/config';
 
 /** One invoice created from an email: status, file name, flag counts and "Open PDF" (new tab). */
 export function InvoiceChip({ invoice }: { invoice: InboxInvoice }) {
@@ -14,7 +15,7 @@ export function InvoiceChip({ invoice }: { invoice: InboxInvoice }) {
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <FlagCounts flags={invoice.flags} />
         <a
-          href={`/api/invoices/${invoice.id}/file`}
+          href={apiUrl(`/invoices/${invoice.id}/file`)}
           target="_blank"
           rel="noopener noreferrer"
           // The row opens the email; the link only opens the PDF.

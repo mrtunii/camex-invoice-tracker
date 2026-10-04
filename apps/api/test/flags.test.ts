@@ -234,6 +234,20 @@ describe('computeFlags', () => {
       expect(codes(flags(clean({ totalAmount: null })))).not.toContain('TOTAL_MATH');
     });
 
+    it('is skipped when no line item has an amount (as LINE_MATH)', () => {
+      const noAmounts = [
+        { ...LINE, amount: null },
+        { ...LINE, kind: 'fee' as const, quantity: null, unitPrice: null, amount: null },
+      ];
+      expect(codes(flags(clean({ lineItems: noAmounts, totalAmount: '999' })))).not.toContain(
+        'TOTAL_MATH',
+      );
+      // One line with an amount is enough to check the sum.
+      expect(
+        codes(flags(clean({ lineItems: [...noAmounts, LINE], totalAmount: '999' }))),
+      ).toContain('TOTAL_MATH');
+    });
+
     it('tolerance: 0.05 absolute', () => {
       expect(codes(flags(clean(singleLine('100.05', '100.05', '100.00'))))).not.toContain(
         'TOTAL_MATH',
@@ -452,7 +466,7 @@ describe('computeFlags', () => {
     expect(codes(flags(clean({ amountDueCurrency: null })))).not.toContain('PAY_IN_OTHER_CURRENCY');
   });
 
-  it('NOT_BILLED_TO_CAMEX unless the bill-to contains "camex"; also when there is none', () => {
+  it('NOT_BILLED_TO_CAMEX unless the bill-to contains "camex" or "კამექს"; also when there is none', () => {
     expect(only(flags(clean({ billToName: 'Georgian Airways' })), 'NOT_BILLED_TO_CAMEX')).toEqual([
       {
         code: 'NOT_BILLED_TO_CAMEX',
@@ -465,6 +479,13 @@ describe('computeFlags', () => {
       'No bill-to name found',
     );
     expect(codes(flags(clean({ billToName: 'CAMEX AIRLINES' })))).not.toContain(
+      'NOT_BILLED_TO_CAMEX',
+    );
+    // "Camex" in Georgian passes too, in Mkhedruli and in Mtavruli (Georgian capitals).
+    for (const billToName of ['შპს კამექს ეარლაინს', 'ᲙᲐᲛᲔᲥᲡ ᲔᲐᲠᲚᲐᲘᲜᲡ']) {
+      expect(codes(flags(clean({ billToName })))).not.toContain('NOT_BILLED_TO_CAMEX');
+    }
+    expect(codes(flags(clean({ billToName: 'შპს ჯორჯიან ეარვეისი' })))).toContain(
       'NOT_BILLED_TO_CAMEX',
     );
     // Blank (e.g. after an edit) reads like none.

@@ -31,6 +31,40 @@ describe('parseEnv', () => {
     expect(parseEnv(valid).BOOTSTRAP_ADMIN_EMAIL).toBeUndefined();
   });
 
+  describe('WEB_ORIGINS', () => {
+    it('parses a comma-separated list of exact origins', () => {
+      expect(
+        parseEnv({ ...valid, WEB_ORIGINS: 'https://camex-fin.site, http://localhost:8090' })
+          .WEB_ORIGINS,
+      ).toEqual(['https://camex-fin.site', 'http://localhost:8090']);
+    });
+
+    it('defaults to the Vite dev server outside production', () => {
+      expect(parseEnv(valid).WEB_ORIGINS).toEqual(['http://localhost:5180']);
+    });
+
+    it('is required in production', () => {
+      expect(() => parseEnv({ ...valid, NODE_ENV: 'production' })).toThrow(
+        /WEB_ORIGINS: required in production/,
+      );
+      expect(
+        parseEnv({ ...valid, NODE_ENV: 'production', WEB_ORIGINS: 'https://camex-fin.site' })
+          .WEB_ORIGINS,
+      ).toEqual(['https://camex-fin.site']);
+    });
+
+    it.each([
+      'https://camex-fin.site/',
+      'https://camex-fin.site/app',
+      'https://Camex-Fin.site',
+      'camex-fin.site',
+      'ftp://camex-fin.site',
+      'https://camex-fin.site,',
+    ])('rejects %s (origins are compared exactly as browsers send them)', (value) => {
+      expect(() => parseEnv({ ...valid, WEB_ORIGINS: value })).toThrow(/WEB_ORIGINS/);
+    });
+  });
+
   describe('BOOTSTRAP_ADMIN_*', () => {
     const PASSWORD = 'bootstrap-secret-password';
 

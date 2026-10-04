@@ -193,6 +193,29 @@ describe('invoice evaluation', () => {
       expect(await linkEvents(id)).toMatchObject([{ data: { vendorId, method: 'email_domain' } }]);
     });
 
+    it('a subdomain of a vendor domain matches too; the most specific vendor domain wins', async () => {
+      const aeg = await createVendor({ name: 'AEG', emailDomains: ['aegfuels.example'] });
+      const desk = await createVendor({
+        name: 'AEG Billing Desk',
+        emailDomains: ['billing.aegfuels.example'],
+      });
+      const ingestFrom = (from: string) =>
+        ingestFixture(t, 'aeg', {
+          pdf: pdfVariant('aeg', from),
+          from,
+          wire: { vendorName: 'Unknown Seller', invoiceNumber: from },
+        });
+
+      const viaMail = await ingestFrom('ar@mail.aegfuels.example');
+      expect((await row(viaMail)).vendorId).toBe(aeg);
+      expect(await linkEvents(viaMail)).toMatchObject([
+        { data: { vendorId: aeg, method: 'email_domain' } },
+      ]);
+      expect((await row(await ingestFrom('ar@eu.billing.aegfuels.example'))).vendorId).toBe(desk);
+      // Only whole labels count: fakeaegfuels.example is not under aegfuels.example.
+      expect((await row(await ingestFrom('ar@fakeaegfuels.example'))).vendorId).toBeNull();
+    });
+
     it('a name match beats a domain match', async () => {
       await createVendor({ name: 'Someone Else', emailDomains: ['asm-aviation.example'] });
       const byName = await createVendor({ name: 'Aviation Services Management' });
@@ -500,6 +523,104 @@ describe('invoice evaluation', () => {
       const id = await ingestPdf(t, { pdf: fixture('asm.pdf') });
       await evaluator.evaluateWithRelated(id);
       expect((await row(id)).flags).toEqual([]);
+    });
+  });
+
+  describe('evaluation inside the extraction transaction', () => {
+    const handler = () => t.app.get(ExtractionHandler);
+    const extractor = () => t.app.get<InvoiceExtractor>(INVOICE_EXTRACTOR);
+    const extractedAsm = () => ({
+      model: 'claude-sonnet-5-5',
+      promptVersion: 'extract-v1',
+      raw: wireFromExpected(expectedExtraction('asm')),
+      usage: { inputTokens: 1, outputTokens: 1 },
+      durationMs: 1,
+    });
+    const eventCount = (invoiceId: string, type: 'extracted' | 'extraction_failed') =>
+      t.prisma.invoiceEvent.count({ where: { invoiceId, type } });
+
+    it('the committed needs_review row already has its flags (success and final failure)', async () => {
+      // Without the post-commit pass, only what the extraction transaction itself wrote.
+      vi.spyOn(evaluator, 'tryEvaluateWithRelated').mockResolvedValue();
+      const ok = await ingestFixture(t, 'petrocas');
+      expect(await row(ok)).toMatchObject({
+        status: 'needs_review',
+        extractionStatus: 'succeeded',
+      });
+      expect(await codesOf(ok)).toEqual([
+        'MISSING_REQUIRED',
+        'PAY_IN_OTHER_CURRENCY',
+        'NEW_VENDOR',
+      ]);
+
+      const failed = await ingestPdf(t, { pdf: fixture('aeg.pdf') });
+      vi.spyOn(extractor(), 'extract').mockRejectedValue(new Error('timeout'));
+      await expect(
+        handler().handle({ data: { invoiceId: failed }, retryCount: 2, retryLimit: 2 }),
+      ).rejects.toThrow('timeout');
+      expect(await row(failed)).toMatchObject({
+        status: 'needs_review',
+        extractionStatus: 'failed',
+      });
+      expect((await codesOf(failed))[0]).toBe('EXTRACTION_FAILED');
+    });
+
+    it('a throwing evaluation rolls the success write back; the attempt fails as retryable', async () => {
+      const id = await ingestPdf(t, { pdf: fixture('asm.pdf') });
+      vi.spyOn(extractor(), 'extract').mockResolvedValue(extractedAsm());
+      vi.spyOn(evaluator, 'evaluate').mockRejectedValueOnce(new Error('evaluation broke'));
+
+      await expect(
+        handler().handle({ data: { invoiceId: id }, retryCount: 0, retryLimit: 2 }),
+      ).rejects.toThrow('evaluation broke');
+      expect(await row(id)).toMatchObject({
+        status: 'processing',
+        extractionStatus: 'pending',
+        invoiceNumber: null,
+        flags: [],
+      });
+      expect(await eventCount(id, 'extracted')).toBe(0);
+
+      // pg-boss retries; this time the evaluation works.
+      await handler().handle({ data: { invoiceId: id }, retryCount: 1, retryLimit: 2 });
+      expect(await row(id)).toMatchObject({
+        status: 'needs_review',
+        invoiceNumber: 'SI-000218719',
+      });
+      expect(await codesOf(id)).toEqual(['DISPUTE_SOON', 'NEW_VENDOR']);
+      expect(await eventCount(id, 'extracted')).toBe(1);
+    });
+
+    it('a throwing evaluation rolls the final-failure write back; the invoice stays processing', async () => {
+      const id = await ingestPdf(t, { pdf: fixture('asm.pdf') });
+      vi.spyOn(extractor(), 'extract').mockRejectedValue(new Error('timeout'));
+      vi.spyOn(evaluator, 'evaluate').mockRejectedValueOnce(new Error('evaluation broke'));
+
+      await expect(
+        handler().handle({ data: { invoiceId: id }, retryCount: 2, retryLimit: 2 }),
+      ).rejects.toThrow('evaluation broke');
+      expect(await row(id)).toMatchObject({ status: 'processing', extractionStatus: 'pending' });
+      expect(await eventCount(id, 'extraction_failed')).toBe(0);
+    });
+
+    it('the recovery sweep skips an invoice whose evaluation throws and gives up on the rest', async () => {
+      const now = new Date();
+      const old = new Date(now.getTime() - GIVE_UP_AFTER_MS - 60_000);
+      const ids = [
+        await ingestPdf(t, { pdf: pdfVariant('asm', '1') }),
+        await ingestPdf(t, { pdf: pdfVariant('asm', '2') }),
+      ];
+      for (const [i, id] of ids.entries()) {
+        // Distinct ages so the sweep's order (oldest first) is known.
+        await t.prisma
+          .$executeRaw`UPDATE invoices SET updated_at = ${new Date(old.getTime() - (2 - i) * 1000)} WHERE id = ${id}::uuid`;
+      }
+      vi.spyOn(evaluator, 'evaluate').mockRejectedValueOnce(new Error('evaluation broke'));
+
+      const result = await t.app.get(RecoverySweep).run(now);
+      expect(result.failed).toEqual([ids[1]]);
+      expect((await row(ids[0] ?? '')).status).toBe('processing');
+      expect(await codesOf(ids[1] ?? '')).toContain('EXTRACTION_FAILED');
     });
   });
 });

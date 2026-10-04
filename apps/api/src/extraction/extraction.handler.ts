@@ -25,8 +25,9 @@ export interface ExtractionAttempt {
 
 /**
  * Runs one extraction attempt for one invoice (SPEC §7): extract → normalize → store every
- * field → needs_review, then (after commit) vendor match, derived dates and flags. Idempotent:
- * an invoice that is no longer `processing` is left alone.
+ * field → needs_review, evaluated (vendor match, derived dates, flags) in the same transaction;
+ * after commit the invoices sharing its file or number are re-evaluated too, so duplicates
+ * converge. Idempotent: an invoice that is no longer `processing` is left alone.
  */
 @Injectable()
 export class ExtractionHandler {
@@ -88,7 +89,7 @@ export class ExtractionHandler {
           { invoiceId, attempt, retryable: false, err: message },
           'extraction failed',
         );
-        const failed = await failExtraction(this.prisma, invoiceId, {
+        const failed = await failExtraction(this.prisma, this.evaluator, invoiceId, {
           error: message,
           event: { attempts: attempt, retryable: false },
           output: error.output,
@@ -105,7 +106,7 @@ export class ExtractionHandler {
         'extraction attempt failed',
       );
       if (isFinalAttempt) {
-        const failed = await failExtraction(this.prisma, invoiceId, {
+        const failed = await failExtraction(this.prisma, this.evaluator, invoiceId, {
           error: message,
           event: { attempts: attempt },
         });
@@ -115,7 +116,11 @@ export class ExtractionHandler {
     }
   }
 
-  /** Returns whether the result was applied (false: the invoice was no longer processing). */
+  /**
+   * Returns whether the result was applied (false: the invoice was no longer processing). The
+   * evaluation runs in the same transaction: if it throws, nothing is written and the attempt
+   * fails like any other retryable error.
+   */
   private async storeSuccess(
     invoiceId: string,
     result: ExtractionResult,
@@ -150,6 +155,7 @@ export class ExtractionHandler {
           },
         },
       });
+      await this.evaluator.evaluate(tx, invoiceId, this.evaluator.today());
       return true;
     });
   }

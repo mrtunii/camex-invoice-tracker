@@ -1,5 +1,6 @@
 import { PASSWORD_CHANGE_REQUIRED } from '@camex/shared';
 import type { z } from 'zod';
+import { apiUrl } from '@/lib/config';
 
 export class ApiError extends Error {
   override readonly name = 'ApiError';
@@ -31,9 +32,10 @@ async function send(path: string, { method = 'GET', body }: RequestOptions): Pro
   let res: Response;
   try {
     const isForm = body instanceof FormData;
-    res = await fetch(`/api${path}`, {
+    // The API is on its own host (same site): the session cookie only goes with 'include'.
+    res = await fetch(apiUrl(path), {
       method,
-      credentials: 'same-origin',
+      credentials: 'include',
       headers: body === undefined || isForm ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });

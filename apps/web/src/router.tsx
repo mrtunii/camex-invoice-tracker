@@ -21,7 +21,7 @@ export const router = createBrowserRouter([
             path: 'invoices',
             element: (
               <PlaceholderPage title="Invoices">
-                Invoices emailed to invoices@camex.aero or uploaded here will be listed for review.
+                Invoices that arrive by email or are uploaded will be listed here for review.
               </PlaceholderPage>
             ),
           },

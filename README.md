@@ -40,6 +40,7 @@ pnpm simulate:mailgun                     # three signed "Mailgun" emails, one p
 pnpm simulate:mailgun --file fixtures/invoices/asm.pdf --extra-attachment   # + an ignored non-PDF
 pnpm simulate:mailgun --message-id '<demo@vendor>'    # run twice: the second reply is {"duplicate":true}
 pnpm simulate:mailgun --bad-signature                 # 401
+MAILGUN_WEBHOOK_SIGNING_KEY=… pnpm simulate:mailgun --url https://api.camex-fin.site   # a deployed API
 ```
 
 The emails appear on `/inbox`. Each PDF becomes an invoice that moves from Processing to Needs review within a few seconds. Manual upload is on the same page.
@@ -66,17 +67,26 @@ Vendors are managed on `/vendors` (or `/api/vendors`). Creating or changing a ve
 
 ## Everyday commands
 
-| Command                                               | What it does                                                                       |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `pnpm dev`                                            | shared (watch) + API (watch, with job workers) + web dev server                    |
-| `pnpm test`                                           | API tests against `TEST_DATABASE_URL` and `TEST_S3_BUCKET` (both reset by the run) |
-| `pnpm lint` / `pnpm format`                           | ESLint + Prettier check / write                                                    |
-| `pnpm typecheck`                                      | `tsc --noEmit` in every workspace                                                  |
-| `pnpm build` then `NODE_ENV=production pnpm start`    | production build; the API serves the SPA on `PORT`                                 |
-| `pnpm db:migrate`                                     | apply committed migrations (`prisma migrate deploy`)                               |
-| `pnpm db:migrate:dev --name <name>`                   | create a new migration from `schema.prisma` changes                                |
-| `pnpm simulate:mailgun [flags]`                       | signed Mailgun webhook POSTs to the local API (`--help` for flags)                 |
-| `pnpm eval:extraction [flags]`                        | extraction eval against the golden files (calls the Anthropic API; `--help`)       |
-| `pnpm create-admin --email … --name … [--password …]` | create an admin from the command line (local development)                          |
+| Command                                               | What it does                                                                                       |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                            | shared (watch) + API (watch, with job workers) + web dev server                                    |
+| `pnpm test`                                           | API tests against `TEST_DATABASE_URL` and `TEST_S3_BUCKET` (both reset by the run), web unit tests |
+| `pnpm lint` / `pnpm format`                           | ESLint + Prettier check / write                                                                    |
+| `pnpm typecheck`                                      | `tsc --noEmit` in every workspace                                                                  |
+| `pnpm build`                                          | build every workspace (`apps/api/dist`, `apps/web/dist`)                                           |
+| `pnpm db:migrate`                                     | apply committed migrations (`prisma migrate deploy`)                                               |
+| `pnpm db:migrate:dev --name <name>`                   | create a new migration from `schema.prisma` changes                                                |
+| `pnpm simulate:mailgun [flags]`                       | signed Mailgun webhook POSTs to the local API (`--help` for flags)                                 |
+| `pnpm eval:extraction [flags]`                        | extraction eval against the golden files (calls the Anthropic API; `--help`)                       |
+| `pnpm create-admin --email … --name … [--password …]` | create an admin from the command line (local development)                                          |
 
 Background jobs (extraction, recovery sweep) run in the API process on pg-boss, in the `pgboss` schema of the same database. Set `WORKERS_ENABLED=false` to run an API process without workers.
+
+## Deployment
+
+Two images built from this repo, deployed as two Dokploy applications behind Traefik: the API (`apps/api/Dockerfile`, runs migrations on start) and the web app (`apps/web/Dockerfile`, nginx, reads its API URL at container start). Both use the repo root as build context. The runbook, with every environment variable, is [docs/deploy.md](docs/deploy.md).
+
+```sh
+docker build -f apps/api/Dockerfile -t camex-api .
+docker build -f apps/web/Dockerfile -t camex-web .
+```

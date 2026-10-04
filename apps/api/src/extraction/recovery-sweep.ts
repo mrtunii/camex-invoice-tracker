@@ -39,14 +39,23 @@ export class RecoverySweep {
     const expired = await this.stuckSince(giveUpBefore);
     const failed: string[] = [];
     for (const id of expired) {
-      const applied = await failExtraction(this.prisma, id, {
-        error: GIVE_UP_ERROR,
-        event: { retryable: false },
-        unchangedSince: giveUpBefore,
-      });
-      if (applied) {
-        failed.push(id);
-        await this.evaluator.tryEvaluateWithRelated(id);
+      try {
+        const applied = await failExtraction(this.prisma, this.evaluator, id, {
+          error: GIVE_UP_ERROR,
+          event: { retryable: false },
+          unchangedSince: giveUpBefore,
+        });
+        if (applied) {
+          failed.push(id);
+          await this.evaluator.tryEvaluateWithRelated(id);
+        }
+      } catch (error) {
+        // Nothing was written (the evaluation runs in the same transaction): the next sweep
+        // tries again, and one invoice can't hold up the others.
+        this.logger.error(
+          { invoiceId: id, err: error instanceof Error ? error.message : String(error) },
+          'giving up on extraction failed',
+        );
       }
     }
 

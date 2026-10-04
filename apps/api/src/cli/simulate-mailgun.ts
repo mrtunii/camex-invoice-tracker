@@ -1,8 +1,10 @@
 /**
- * Sends correctly signed Mailgun route-forward POSTs to the local API, using
- * MAILGUN_WEBHOOK_SIGNING_KEY and PORT from the root .env.
+ * Sends correctly signed Mailgun route-forward POSTs to an API: the local one by default
+ * (http://localhost:$PORT), or any other with --url. Signs with MAILGUN_WEBHOOK_SIGNING_KEY from
+ * the environment, else from the root .env, so a deployed API can be tested without editing .env.
  *
  *   pnpm simulate:mailgun                                  # three emails, one per fixture
+ *   pnpm simulate:mailgun --url https://api.camex-fin.site # another API (its signing key in the env)
  *   pnpm simulate:mailgun --file a.pdf --file b.pdf        # one email with these attachments
  *   pnpm simulate:mailgun --message-id '<x@y>'             # run twice to see the duplicate reply
  *   pnpm simulate:mailgun --extra-attachment               # add a non-PDF (ignored by ingestion)
@@ -49,9 +51,26 @@ const DEFAULT_EMAILS: SimulatedEmail[] = [
   },
 ];
 
-const USAGE = `Usage: pnpm simulate:mailgun [--file <pdf>]... [--from <address>] [--subject <text>]
-                             [--message-id <id>] [--extra-attachment] [--bad-signature]
-Without --file, sends three emails (one per fixture in fixtures/invoices/).`;
+const USAGE = `Usage: pnpm simulate:mailgun [--url <base>] [--file <pdf>]... [--from <address>]
+                             [--subject <text>] [--message-id <id>] [--extra-attachment]
+                             [--bad-signature]
+--url is the API's base URL (default http://localhost:$PORT); the request goes to
+<base>/api/inbound/mailgun. Without --file, sends three emails (one per fixture in
+fixtures/invoices/). Signs with MAILGUN_WEBHOOK_SIGNING_KEY (environment, else the root .env).`;
+
+/** `https://api.camex-fin.site/` → `https://api.camex-fin.site/api/inbound/mailgun`. */
+function webhookUrl(base: string): string {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new Error(`--url must be an absolute URL like https://api.camex-fin.site (got ${base})`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('--url must be an http(s) URL');
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}/api/inbound/mailgun`;
+}
 
 function sign(signingKey: string): { timestamp: string; token: string; signature: string } {
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -134,6 +153,7 @@ async function send(
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
+      url: { type: 'string' },
       file: { type: 'string', multiple: true },
       from: { type: 'string' },
       subject: { type: 'string' },
@@ -152,7 +172,8 @@ async function main(): Promise<void> {
   loadRootEnvFile();
   const signingKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
   if (!signingKey) throw new Error('MAILGUN_WEBHOOK_SIGNING_KEY is not set (see .env.example).');
-  const url = `http://localhost:${process.env.PORT ?? '3180'}/api/inbound/mailgun`;
+  const url = webhookUrl(values.url ?? `http://localhost:${process.env.PORT ?? '3180'}`);
+  console.log(`POST ${url}`);
 
   // pnpm runs this from apps/api; resolve --file paths against where pnpm was invoked.
   const cwd = process.env.INIT_CWD ?? process.cwd();

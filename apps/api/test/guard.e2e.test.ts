@@ -75,7 +75,7 @@ describe('global session guard', () => {
   });
 
   it('lets @Public routes through without a session', async () => {
-    await t.http().get('/api/health').expect(200, { status: 'ok', db: 'ok' });
+    await t.http().get('/api/health').expect(200, { status: 'ok', db: 'ok', storage: 'ok' });
     await t.http().get('/api/probe/public').expect(200, { ok: true });
     await t.http().get('/api/probe-public-class').expect(200, { ok: true });
     // Login is public: an unauthenticated call reaches the handler (credential error, not guard error).

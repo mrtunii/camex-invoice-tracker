@@ -21,7 +21,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { activeAccountKeys, parseBankAccounts } from '../vendors/bank-accounts.js';
 import { deriveDates } from './derive-dates.js';
-import { emailDomain, isOwnDomain } from './email-domains.js';
+import { emailDomain, isOwnDomain, vendorForDomain } from './email-domains.js';
 import { type DuplicateCandidate, type FlagInvoice, computeFlags } from './flags.js';
 
 export type Tx = Prisma.TransactionClient;
@@ -265,8 +265,8 @@ export class InvoiceEvaluator {
 
   /**
    * SPEC §9 order: vendorKey(vendor_name) against names and aliases; else the sender's domain
-   * (Mailgun only, never one of ours) against email_domains. Keys and domains are unique across
-   * vendors, so at most one vendor matches each way.
+   * (Mailgun only, never one of ours) against email_domains, subdomains included. Keys are unique
+   * across vendors, so at most one vendor matches by name; by domain the most specific wins.
    */
   private async matchVendor(
     tx: Tx,
@@ -289,7 +289,7 @@ export class InvoiceEvaluator {
     if (row.inboundEmail.provider !== 'mailgun') return null;
     const domain = emailDomain(row.inboundEmail.fromAddress);
     if (domain === null || isOwnDomain(domain, this.env.OWN_EMAIL_DOMAINS)) return null;
-    const byDomain = vendors.find((vendor) => vendor.emailDomains.includes(domain));
+    const byDomain = vendorForDomain(domain, vendors);
     return byDomain ? { vendorId: byDomain.id, method: 'email_domain' } : null;
   }
 

@@ -451,7 +451,6 @@ Step 4: after removing the account on /vendors, aeg.pdf flags: BANK_FIRST_SEEN/w
 **Open**
 
 - **One unexplained one-off failure.** In one full run, `mailgun.e2e › rejects a missing token with 401 and stores nothing` failed. My output filter dropped the assertion detail. It didn't recur in 3 runs of that file or in 4 later full runs (3 here, 1 in the clean clone). The test only checks that nothing is stored on a 401. I didn't find a T04 cause.
-- **A failed evaluation looks clean.** If evaluation fails right after an extraction commit (a database error), the invoice is `needs_review` with `flags: []` and no vendor until the 00:05 run or the next change. That reads as "no problems". T06's approve should re-evaluate before checking flags (question 5).
 - **A brief flagless window** sits between the extraction commit and its evaluation: milliseconds, but the Inbox poll can catch it.
 - **For T06: invoice-number edits.** An edit that changes the invoice number must also re-evaluate invoices that shared the old number. `evaluateWithRelated` relates by the current number only. Rejecting already works, because the other invoices are found by sha256 and number, which don't change.
 - **Casing in the SQL prefilter.** The duplicate-number prefilter uses Postgres `upper()`, which differs from JS `toUpperCase()` for a few characters (`ß`). Such numbers could miss DUPLICATE_NUMBER. Whitespace now matches JS.

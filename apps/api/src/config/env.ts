@@ -6,13 +6,34 @@ import { EXTRACT_EXPIRE_SECONDS } from '../extraction/job-limits.js';
 
 const booleanString = z.enum(['true', 'false']).transform((value) => value === 'true');
 
+/** An origin exactly as browsers send it: scheme://host[:port], lowercase, no path or slash. */
+const originSchema = z.string().refine((value) => {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.origin === value;
+  } catch {
+    return false;
+  }
+}, 'must be an origin like https://camex-fin.site (scheme and host, no path or trailing slash)');
+
+/** Without WEB_ORIGINS outside production: the Vite dev server, whose proxy forwards its Origin. */
+export const DEV_WEB_ORIGINS = ['http://localhost:5180'];
+
 /** Field definitions without cross-field rules (`.pick()` is unavailable once refined). */
 export const envObjectSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3180),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
-  WEB_DIST_DIR: z.string().min(1).optional(),
+  /**
+   * The web app's origins, comma-separated (required in production). CORS with credentials is
+   * enabled for exactly these, and state-changing requests from any other Origin get 403.
+   */
+  WEB_ORIGINS: z
+    .string()
+    .transform((value) => value.split(',').map((origin) => origin.trim()))
+    .pipe(z.array(originSchema).min(1))
+    .optional(),
 
   DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgresql:// URL'),
 
@@ -53,33 +74,45 @@ export const envObjectSchema = z.object({
   WORKERS_ENABLED: booleanString.default(true),
 });
 
-export const envSchema = envObjectSchema.superRefine((env, ctx) => {
-  if (env.EXTRACTOR_PROVIDER === 'anthropic' && env.ANTHROPIC_API_KEY === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['ANTHROPIC_API_KEY'],
-      message: 'required when EXTRACTOR_PROVIDER=anthropic',
-    });
-  }
-  if (env.EXTRACTION_TIMEOUT_SECONDS * 2 >= EXTRACT_EXPIRE_SECONDS) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['EXTRACTION_TIMEOUT_SECONDS'],
-      message: `must be below ${EXTRACT_EXPIRE_SECONDS / 2}: a call and its one retry must fail before the ${EXTRACT_EXPIRE_SECONDS} s job expiry`,
-    });
-  }
-  if ((env.BOOTSTRAP_ADMIN_EMAIL === undefined) !== (env.BOOTSTRAP_ADMIN_PASSWORD === undefined)) {
-    ctx.addIssue({
-      code: 'custom',
-      path: [
-        env.BOOTSTRAP_ADMIN_EMAIL === undefined
-          ? 'BOOTSTRAP_ADMIN_EMAIL'
-          : 'BOOTSTRAP_ADMIN_PASSWORD',
-      ],
-      message: 'BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must be set together',
-    });
-  }
-});
+export const envSchema = envObjectSchema
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && env.WEB_ORIGINS === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WEB_ORIGINS'],
+        message: 'required in production (the web app origin, e.g. https://camex-fin.site)',
+      });
+    }
+    if (env.EXTRACTOR_PROVIDER === 'anthropic' && env.ANTHROPIC_API_KEY === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ANTHROPIC_API_KEY'],
+        message: 'required when EXTRACTOR_PROVIDER=anthropic',
+      });
+    }
+    if (env.EXTRACTION_TIMEOUT_SECONDS * 2 >= EXTRACT_EXPIRE_SECONDS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EXTRACTION_TIMEOUT_SECONDS'],
+        message: `must be below ${EXTRACT_EXPIRE_SECONDS / 2}: a call and its one retry must fail before the ${EXTRACT_EXPIRE_SECONDS} s job expiry`,
+      });
+    }
+    if (
+      (env.BOOTSTRAP_ADMIN_EMAIL === undefined) !==
+      (env.BOOTSTRAP_ADMIN_PASSWORD === undefined)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [
+          env.BOOTSTRAP_ADMIN_EMAIL === undefined
+            ? 'BOOTSTRAP_ADMIN_EMAIL'
+            : 'BOOTSTRAP_ADMIN_PASSWORD',
+        ],
+        message: 'BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must be set together',
+      });
+    }
+  })
+  .transform((env) => ({ ...env, WEB_ORIGINS: env.WEB_ORIGINS ?? DEV_WEB_ORIGINS }));
 
 export type Env = z.infer<typeof envSchema>;
 

@@ -66,5 +66,10 @@ export default tseslint.config(
     files: ['**/*.js'],
     ...tseslint.configs.disableTypeChecked,
   },
+  {
+    // Plain scripts the browser loads as-is (the dev runtime config).
+    files: ['apps/web/public/**/*.js'],
+    languageOptions: { globals: globals.browser },
+  },
   prettier,
 );

@@ -63,8 +63,8 @@ export interface TestApp {
 class TestRootModule {}
 
 /**
- * Boots the app the same way main.ts does (NestFactory, not @nestjs/testing: the testing
- * module instantiates providers before the HTTP adapter exists, which disables ServeStaticModule).
+ * Boots the app the same way main.ts does (NestFactory + configureApp), so the global
+ * middleware (CORS, Origin check, webhook limits) applies as in production.
  */
 export async function createTestApp(
   options: { env?: NodeJS.ProcessEnv; controllers?: Type[] } = {},

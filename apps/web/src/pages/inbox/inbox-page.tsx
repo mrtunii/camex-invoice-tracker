@@ -13,8 +13,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { UploadInvoicesDialog } from '@/components/upload-invoices-dialog';
+import { appConfig } from '@/lib/config';
 import { formatTimestamp } from '@/lib/format';
 import { EmailSheet } from './email-sheet';
+import { InboxAddress } from './inbox-address';
 import { InvoiceChip } from './invoice-chip';
 import { inboxQueryKey, useInbox } from './inbox-query';
 
@@ -84,12 +86,23 @@ export function InboxPage() {
   const queryClient = useQueryClient();
   const [openEmailId, setOpenEmailId] = useState<string | null>(null);
   const emails = inbox.data?.pages.flatMap((page) => page.items) ?? [];
+  const { inboxAddress } = appConfig;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Inbox"
-        description="Every email received at invoices@camex.aero and every manual upload, newest first. Each PDF becomes an invoice; other attachments are ignored."
+        description={
+          <>
+            Every email received and every manual upload, newest first. Each PDF becomes an invoice;
+            other attachments are ignored.
+            {inboxAddress !== null && (
+              <span className="mt-1.5 block">
+                <InboxAddress address={inboxAddress} />
+              </span>
+            )}
+          </>
+        }
         actions={
           <UploadInvoicesDialog
             onUploaded={() => void queryClient.invalidateQueries({ queryKey: inboxQueryKey })}
@@ -120,8 +133,16 @@ export function InboxPage() {
                 </TableRow>
               ) : emails.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
-                    Nothing received yet. Emails to invoices@camex.aero and uploads appear here.
+                  <TableCell
+                    colSpan={5}
+                    className="py-12 text-center whitespace-normal text-muted-foreground"
+                  >
+                    <p>Nothing received yet. Emailed invoices and uploads appear here.</p>
+                    {inboxAddress !== null && (
+                      <p className="mt-2">
+                        <InboxAddress address={inboxAddress} />
+                      </p>
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (

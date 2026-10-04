@@ -1,0 +1,13 @@
+# Build context for apps/api/Dockerfile and apps/web/Dockerfile (both use the repo root).
+**/node_modules
+**/dist
+**/coverage
+**/.env*
+**/*.tsbuildinfo
+**/.DS_Store
+.git
+.remember
+docs/reports
+fixtures/invoices/eval-out
+# Regenerated inside the build (prisma generate)
+apps/api/src/generated

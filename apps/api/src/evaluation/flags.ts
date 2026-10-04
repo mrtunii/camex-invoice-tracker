@@ -105,6 +105,9 @@ const NOT_AN_INVOICE_MESSAGES: Partial<Record<DocumentType, string>> = {
   other: 'This document is not an invoice',
 };
 
+/** "Camex" in Latin and in Georgian script, compared lowercase. */
+const CAMEX_NAMES = ['camex', 'კამექს'];
+
 const MIN_TOLERANCE = new Prisma.Decimal('0.05');
 /** 0.01 % */
 const RELATIVE_TOLERANCE = new Prisma.Decimal('0.0001');
@@ -145,8 +148,8 @@ function sameVendor(invoice: FlagInvoice, other: DuplicateCandidate): boolean {
 
 function amountFlags(invoice: FlagInvoice, add: AddFlag): void {
   const { lineItems, totalAmount, taxAmount } = invoice;
-  if (lineItems.length > 0 && totalAmount !== null) {
-    // Lines without an amount add nothing.
+  // Like LINE_MATH, only with something to add up: lines without an amount add nothing.
+  if (lineItems.some((line) => line.amount !== null) && totalAmount !== null) {
     const sum = lineItems.reduce(
       (acc, line) => (line.amount === null ? acc : acc.plus(line.amount)),
       new Prisma.Decimal(0),
@@ -266,7 +269,7 @@ export function computeFlags(input: FlagInput, today: string): InvoiceFlag[] {
   const billTo = invoice.billToName;
   if (billTo === null || isEmpty(billTo)) {
     add('NOT_BILLED_TO_CAMEX', 'billToName', 'No bill-to name found');
-  } else if (!billTo.toLowerCase().includes('camex')) {
+  } else if (!CAMEX_NAMES.some((name) => billTo.toLowerCase().includes(name))) {
     add('NOT_BILLED_TO_CAMEX', 'billToName', `Billed to "${billTo}", not Camex`);
   }
   const notInvoice =

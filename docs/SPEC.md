@@ -56,7 +56,9 @@ Design consequences:
 - Background jobs: pg-boss (Postgres-backed, no Redis).
 - Files: private S3-compatible bucket (MinIO locally). PDFs are only served through the API behind session auth.
 - LLM behind an `InvoiceExtractor` interface; provider and model from env.
-- Production: one container (API serves the built SPA and runs the job worker in-process) + Postgres + bucket.
+- Deployed as two applications built from this repo (Dokploy, Traefik terminating TLS): the **API** (also runs the job worker in-process; `apps/api/Dockerfile`) and the **web** app (static SPA on nginx; `apps/web/Dockerfile`), plus a hosted Postgres and a private bucket (Cloudflare R2). Every domain is configuration; nothing environment-specific is built into an image. Runbook: [docs/deploy.md](deploy.md).
+- **Runtime web config.** The SPA reads `window.__APP_CONFIG__ = { apiBaseUrl, inboxAddress }` from `/config.js`, loaded before the bundle. The web container writes it at start from `API_BASE_URL` and `INBOX_ADDRESS`; in dev it is `apps/web/public/config.js` (`apiBaseUrl: ""`, so `/api` goes through the Vite proxy). No `VITE_*` variables for anything environment-specific. Every API call goes to `${apiBaseUrl}/api/...` with `credentials: 'include'`.
+- **Same-site rule.** The web and API hosts share a registrable domain: staging `camex-fin.site` + `api.camex-fin.site`; production follows the same pattern (e.g. `invoices.example.com` + `api.invoices.example.com`). The session cookie stays `SameSite=Lax` and host-only on the API host: a same-site `fetch` with credentials carries it, a cross-site one doesn't. There is no `SameSite=None` mode.
 - Business timezone ("today", overdue): `Asia/Tbilisi`.
 
 ```
@@ -73,8 +75,8 @@ Manual upload ──▶ /api/invoices/upload ──┼─▶ store email + PDFs 
 ## 4. Ingestion
 
 ### Mailgun
-- **Receiving domain.** Mailgun only receives for a domain whose MX points to Mailgun. If `camex.aero` mail is hosted elsewhere (Google/Microsoft), use a subdomain (e.g. `in.camex.aero`) for Mailgun and forward `invoices@camex.aero` → `invoices@in.camex.aero` in the existing mail system. Vendors only ever see `invoices@camex.aero`.
-- Route: `match_recipient(...)` → `forward("https://<host>/api/inbound/mailgun")` → `stop()`.
+- **Receiving domain.** A Mailgun domain per environment, whose MX points to Mailgun (staging: `mg.camex-fin.site`, address `invoices@mg.camex-fin.site`). The inbound domain is configuration: the code never depends on the recipient address, and the address is shown in the UI from `INBOX_ADDRESS`.
+- Route: `match_recipient(...)` → `forward("https://<api host>/api/inbound/mailgun")` → `stop()`.
 - The endpoint receives `multipart/form-data` (parsed message + attachments as files). Verify field names against current Mailgun docs.
 - **Security:** verify `signature == HMAC-SHA256(webhook signing key, timestamp + token)` (hex, constant-time compare); otherwise 401. The endpoint needs no session.
 - **Idempotency:** unique on `Message-Id`; a repeated delivery returns 200 and does nothing.
@@ -167,7 +169,7 @@ Conventions: uuid ids · `timestamptz` timestamps · calendar dates as `date` ·
 
 ## 8. Validation flags (code, not LLM)
 
-Recomputed after extraction (success or final failure), after every edit, after every vendor change (for that vendor's `needs_review` and `unpaid` invoices; a new vendor or a changed name, alias or domain also re-matches unlinked `needs_review` invoices), and daily at 00:05 Asia/Tbilisi for every `needs_review` and `unpaid` invoice (DISPUTE_SOON and FUTURE_DATE depend on the date). No flags while `processing`. Money tolerance: |diff| ≤ max(0.05, 0.01% of expected), decimal arithmetic only.
+Recomputed after extraction (success or final failure, in the same transaction as the extraction write: a `needs_review` invoice never exists without its flags; if evaluation fails, the write rolls back and the job retries), after every edit, after every vendor change (for that vendor's `needs_review` and `unpaid` invoices; a new vendor or a changed name, alias or domain also re-matches unlinked `needs_review` invoices), and daily at 00:05 Asia/Tbilisi for every `needs_review` and `unpaid` invoice (DISPUTE_SOON and FUTURE_DATE depend on the date). No flags while `processing`. Money tolerance: |diff| ≤ max(0.05, 0.01% of expected), decimal arithmetic only.
 
 Each flag is `{code, severity, field, message}`. `field` is the camelCase path of the field it is about, for the review UI to focus (`dueDate`, `totalAmount`, `lineItems.1.amount`, `bankDetails.iban`), or null. Flags are ordered errors, then warnings, then info (table order within a severity). Messages are plain English and never contain bank account numbers.
 
@@ -175,7 +177,7 @@ Each flag is `{code, severity, field, message}`. `field` is the camelCase path o
 |---|---|---|
 | EXTRACTION_FAILED | error | extraction failed |
 | MISSING_REQUIRED | error | a field required for approval is empty (one flag per field) |
-| TOTAL_MATH | error | neither sum(line amounts) nor sum(line amounts) + tax_amount equals total_amount; skipped without line items or total |
+| TOTAL_MATH | error | neither sum(line amounts) nor sum(line amounts) + tax_amount equals total_amount; skipped without a total or when no line item has an amount |
 | LINE_MATH | warning | quantity × unit_price ≠ amount on a line (lines with all three only) |
 | DUE_BEFORE_INVOICE | error | due_date < invoice_date |
 | TERMS_MISMATCH | warning | printed due_date ≠ invoice_date + payment_terms_days (source `printed` and terms set) |
@@ -183,7 +185,7 @@ Each flag is `{code, severity, field, message}`. `field` is the camelCase path o
 | FUTURE_DATE | warning | invoice_date > today |
 | SERVICE_AFTER_INVOICE | warning | service_date > invoice_date |
 | PAY_IN_OTHER_CURRENCY | info | amount_due_currency ≠ currency |
-| NOT_BILLED_TO_CAMEX | warning | bill_to_name doesn't contain "camex" (case-insensitive), or is empty |
+| NOT_BILLED_TO_CAMEX | warning | bill_to_name contains neither "camex" nor "კამექს" (case-insensitive), or is empty |
 | NOT_AN_INVOICE | warning | document_type ∉ {invoice, credit_note} |
 | DUPLICATE_FILE | error | same sha256 on another non-rejected invoice, in any status (including paid) |
 | DUPLICATE_NUMBER | error | same invoice number (uppercase, spaces removed) and same vendor on another non-rejected invoice, in any status: same vendor_id, or the same normalized vendor_name when either is unlinked |
@@ -198,10 +200,10 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 
 ## 9. Vendors
 
-- Matching runs for unlinked invoices in `needs_review` (after extraction and on the re-evaluations of §8). Order: the normalized vendor_name against each vendor's name and aliases; then the sender's email domain (the From address) against email_domains, only for emails received through Mailgun (never manual uploads) and never for a domain in `OWN_EMAIL_DOMAINS` (config, comma-separated, default `camex.aero`; subdomains included). A name match beats a domain match. A match writes `vendor_linked` (`{vendorId, method: name | alias | email_domain}`, system). No match → vendor_id null + `NEW_VENDOR`.
+- Matching runs for unlinked invoices in `needs_review` (after extraction and on the re-evaluations of §8). Order: the normalized vendor_name against each vendor's name and aliases; then the sender's email domain (the From address) against email_domains, where a vendor domain also matches its subdomains (`mail.aegfuels.com` matches `aegfuels.com`; the most specific vendor domain wins), only for emails received through Mailgun (never manual uploads) and never for a domain in `OWN_EMAIL_DOMAINS` (config, comma-separated, default `camex.aero`; subdomains included). A name match beats a domain match. A match writes `vendor_linked` (`{vendorId, method: name | alias | email_domain}`, system). No match → vendor_id null + `NEW_VENDOR`.
 - Normalized name ("vendor key"): lowercase, punctuation removed, whitespace collapsed, a leading "შპს" or "ооо" removed, trailing legal forms removed repeatedly (llc, ltd, limited, fze, fzco, fzllc, gmbh, inc, incorporated, corp, corporation, co, company, plc, llp, sa, srl, sarl, bv, ag, jsc, ojsc, cjsc, ooo, na).
 - Uniqueness: name and alias keys are unique across all vendors' names and aliases, and email domains across vendors (409 naming the other vendor). Domains are lowercase hostnames; `OWN_EMAIL_DOMAINS` and public mailbox domains (gmail.com, googlemail.com, outlook.com, hotmail.com, live.com, yahoo.com, icloud.com, mail.ru, yandex.ru, proton.me) are refused. Default terms: 0–365 days or none.
-- On approve without a vendor: "Create vendor" or "Link to existing" (searchable). A manual link (`vendor_linked`, `method: manual`) adds the extracted vendor_name to the vendor's aliases when neither its name nor an alias matches it (subject to the uniqueness rule).
+- On approve without a vendor: "Create vendor" or "Link to existing" (searchable). A manual link (`vendor_linked`, `method: manual`) adds the extracted vendor_name to the vendor's aliases when neither its name nor an alias matches it (subject to the uniqueness rule: when another vendor already owns that name, the link is made and no alias is added).
 - Trusted bank accounts are added only from an invoice ("trust these details", in `needs_review` or `unpaid`, writes `bank_account_trusted` with ids only); there is no manual entry in v1. Removal is soft (§5).
 - Vendors page: list; edit name, aliases, domains, default terms; view/remove trusted bank accounts.
 
@@ -227,8 +229,10 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 ## 11. Auth and users
 
 - Email + password (argon2id). No signup endpoint. The first admin is created from BOOTSTRAP_ADMIN_* env vars on boot, only when no users exist (CLI kept for local dev). A password set by someone else must be changed on first login. Admins can reset another user's password to a temporary one. Admins create other admins with an initial password shared out-of-band; users can change their password.
-- DB-backed sessions: opaque 32-byte random token in an httpOnly cookie (Secure in prod, SameSite=Lax); only its SHA-256 is stored. 14-day expiry, extended on use.
-- Login rate-limited per IP and per email; generic error messages.
+- DB-backed sessions: opaque 32-byte random token in an httpOnly cookie (Secure in prod, SameSite=Lax, host-only on the API host; §3 same-site rule); only its SHA-256 is stored. 14-day expiry, extended on use.
+- **CORS:** `WEB_ORIGINS` (comma-separated exact origins; required in production, e.g. `https://camex-fin.site`). Only those origins get CORS headers: credentials, methods GET/POST/PATCH/DELETE, header Content-Type, preflight max-age 600. `/api/inbound/*` gets none.
+- **Origin check** (CSRF defence in depth): a POST, PATCH or DELETE on `/api/*` (except `/api/inbound/*`) whose `Origin` header isn't in `WEB_ORIGINS` gets 403; no `Origin` (curl, scripts) is allowed.
+- Login rate-limited per IP and per email; generic error messages. Behind a proxy the client IP comes from `X-Forwarded-For`, so `TRUST_PROXY` must equal the number of proxy hops (1 behind Dokploy's Traefik), or every login shares the proxy's IP.
 - Users are deactivated, never deleted. Deactivation revokes sessions. You can't deactivate yourself.
 - All authenticated users have full permissions.
 
@@ -237,7 +241,9 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 - Config validated with zod at boot; fail fast on missing env.
 - Structured logs (pino). Log inbound and extraction outcomes. Never log bank details or file contents.
 - Server-side input validation with zod from `packages/shared`.
-- Daily Postgres backups and bucket versioning in production (T07).
+- Health: `GET /api/health` (public) checks the database and the bucket (ListObjectsV2, 2 s timeout); 503 if either fails. The API image's Docker `HEALTHCHECK` calls it; the web image serves `/healthz`.
+- Migrations run on start: the API container applies `prisma migrate deploy`, then starts the server. A failed migration stops the container.
+- Daily Postgres backups from the database host; the bucket is protected by R2 bucket lock rules (R2 has no object versioning) and the app never deletes or overwrites objects. Runbook: [docs/deploy.md](deploy.md).
 
 ## 13. Task roadmap
 
@@ -249,7 +255,7 @@ Duplicates converge even when two arrive at once: after each commit the invoice 
 | T04 | Validation + vendors: flag engine, derived dates, dedupe, vendor matching, bank checks, Vendors page | flags correct on fixtures and crafted cases |
 | T05 | Invoices list: tabs, filters, totals, CSV, upload | |
 | T06 | Detail split view + state machine + actions + audit trail | full review → paid loop works |
-| T07 | Deploy: Dockerfile, env, Mailgun/DNS runbook, backups, prod checklist | live, real email processed |
+| T07 | Deploy: Dockerfiles + Dokploy runbook | staging live |
 
 ## 14. Working agreement
 

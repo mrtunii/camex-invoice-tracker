@@ -11,5 +11,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "docker", "vite.config.ts"]
 }

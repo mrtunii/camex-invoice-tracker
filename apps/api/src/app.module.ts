@@ -11,7 +11,6 @@ import { InvoicesModule } from './invoices/invoices.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { loggerParams } from './logging.js';
 import { PrismaModule } from './prisma/prisma.module.js';
-import { spaModule } from './spa.js';
 import { StorageModule } from './storage/storage.module.js';
 import { UsersModule } from './users/users.module.js';
 import { VendorsModule } from './vendors/vendors.module.js';
@@ -35,7 +34,6 @@ export class AppModule {
         InboxModule,
         InvoicesModule,
         VendorsModule,
-        ...(env.NODE_ENV === 'production' ? [spaModule(env)] : []),
       ],
       controllers: [HealthController],
     };
